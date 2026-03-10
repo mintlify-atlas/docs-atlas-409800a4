@@ -1,0 +1,211 @@
+---
+title: 'Resend OTP'
+api: 'POST /api/auth/resend-otp'
+description: 'Resend an OTP to a phone number if the previous one expired or was not received'
+---
+
+## Overview
+
+This endpoint generates and resends a new OTP to the specified phone number. It includes rate limiting to prevent abuse, with a maximum number of resend attempts within a time window. Use this when the user did not receive the initial OTP or if it has expired.
+
+## Authentication
+
+This endpoint does not require authentication.
+
+## Request Body
+
+<ParamField body="phoneNumber" type="string" required>
+  The phone number to resend the OTP to. Must include country code with + prefix (e.g., +966501234567).
+  
+  **Validation rules:**
+  - Must start with `+`
+  - Length must be between 9 and 16 digits (including country code)
+  - Only digits allowed after the `+` symbol
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Success message in Arabic: "تم إعادة إرسال رمز التحقق بنجاح" (OTP resent successfully)
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  The new OTP code (6 digits). This field is only returned in development/testing environments.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string" format="date-time">
+  ISO 8601 timestamp indicating when the new OTP expires (5 minutes from generation)
+</ResponseField>
+
+<ResponseField name="remainingAttempts" type="integer">
+  Number of resend attempts remaining before the phone number is temporarily blocked
+</ResponseField>
+
+<RequestExample>
+
+```bash cURL
+curl -X POST https://api.masareagle.com/api/auth/resend-otp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+966501234567"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.masareagle.com/api/auth/resend-otp', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    phoneNumber: '+966501234567'
+  })
+});
+
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'https://api.masareagle.com/api/auth/resend-otp',
+    json={
+        'phoneNumber': '+966501234567'
+    }
+)
+
+data = response.json()
+```
+
+```csharp C#
+using System.Net.Http.Json;
+
+var client = new HttpClient();
+var response = await client.PostAsJsonAsync(
+    "https://api.masareagle.com/api/auth/resend-otp",
+    new { PhoneNumber = "+966501234567" }
+);
+
+var data = await response.Content.ReadFromJsonAsync<ResendOtpResponse>();
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200 Success
+{
+  "message": "تم إعادة إرسال رمز التحقق بنجاح",
+  "code": "789012",
+  "expiresAt": "2026-03-10T15:40:00Z",
+  "remainingAttempts": 2
+}
+```
+
+```json 400 Invalid Phone Number
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": {
+    "phoneNumber": [
+      "يجب أن يحتوي رقم الهاتف على أرقام فقط بعد +"
+    ]
+  }
+}
+```
+
+```json 400 Phone Number Required
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": {
+    "phoneNumber": [
+      "رقم الهاتف مطلوب"
+    ]
+  }
+}
+```
+
+```json 429 Rate Limit Exceeded
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.29",
+  "title": "Too many resend attempts",
+  "status": 429,
+  "detail": "Maximum resend attempts exceeded. Please try again later.",
+  "cooldownSeconds": 300
+}
+```
+
+```json 500 SMS Service Error
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+  "title": "An error occurred while processing your request.",
+  "status": 500,
+  "detail": "Failed to send SMS"
+}
+```
+
+</ResponseExample>
+
+## Rate Limiting
+
+The resend OTP endpoint implements rate limiting to prevent abuse:
+
+- **Maximum Attempts**: Limited number of resend attempts per phone number (typically 3-5 attempts)
+- **Cooldown Period**: After exceeding the limit, the phone number is temporarily blocked (typically 5-15 minutes)
+- **Response Indicator**: The `remainingAttempts` field shows how many attempts are left
+
+When rate limit is exceeded, the endpoint returns a `429 Too Many Requests` status with a `cooldownSeconds` field indicating when the user can try again.
+
+## Implementation Details
+
+The endpoint:
+1. Validates the phone number format
+2. Checks rate limiting rules for the phone number
+3. Invalidates any existing OTP for this phone number
+4. Generates a new 6-digit OTP code using cryptographic random number generation
+5. Stores the new OTP in the database with a 5-minute expiration
+6. Sends the OTP via SMS using the configured SMS provider (Taqnyat)
+7. Returns the expiration time and remaining resend attempts
+
+## Best Practices
+
+**Client Implementation:**
+- Show the `remainingAttempts` count to users
+- Disable the resend button temporarily after each request (e.g., 30 seconds)
+- Display countdown timer showing when user can resend again
+- Show clear error messages when rate limit is exceeded
+
+**User Experience:**
+- Provide alternative support channels when rate limit is reached
+- Consider implementing a "call me" option as a fallback
+- Log failed attempts for fraud detection
+
+## Use Cases
+
+- **OTP Not Received**: User didn't receive the SMS due to network issues
+- **OTP Expired**: User took too long to enter the code (>5 minutes)
+- **Wrong Number**: User initially provided incorrect phone number
+- **SMS Delay**: SMS delivery is delayed due to carrier issues
+
+## Next Steps
+
+After receiving the new OTP:
+1. User enters the new OTP code in your application
+2. Call the [Token endpoint](/api/identity/token) with grant type `urn:masareagle:otp`
+3. Use the returned access token for authenticated requests
+
+## Related Endpoints
+
+- [Send OTP](/api/identity/send-otp) - Initial OTP generation and sending
+- [Token](/api/identity/token) - Exchange OTP for access tokens
+
+## Source Code Reference
+
+- Endpoint: `src/services/Identity/src/Identity.Web/AuthEndpoints.cs:18`
+- Command: `src/services/Identity/src/Identity.UseCases/Auth/ResendOtp/ResendOtpCommand.cs`
+- OTP Service: `src/services/Identity/src/Identity.Core/Interfaces/IOtpService.cs`
+- Phone Validation: `src/services/Identity/src/Identity.Core/ValueObjects/PhoneNumber.cs`

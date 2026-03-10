@@ -1,0 +1,416 @@
+---
+title: Prerequisites
+description: System requirements and dependencies for Masar Eagle
+icon: list-check
+---
+
+## Overview
+
+Before installing Masar Eagle, ensure your system meets the following requirements. This guide covers all necessary software, hardware specifications, and dependencies needed to run Masar Eagle successfully.
+
+## System Requirements
+
+### Hardware Requirements
+
+<CardGroup cols={2}>
+  <Card title="Development Environment" icon="laptop-code">
+    - **CPU**: 4+ cores recommended
+    - **RAM**: 8GB minimum, 16GB recommended
+    - **Storage**: 20GB free space
+    - **Network**: Stable internet connection
+  </Card>
+  
+  <Card title="Production Environment" icon="server">
+    - **CPU**: 8+ cores recommended
+    - **RAM**: 16GB minimum, 32GB+ recommended
+    - **Storage**: 100GB+ SSD storage
+    - **Network**: High-bandwidth connection
+  </Card>
+</CardGroup>
+
+### Operating System
+
+<AccordionGroup>
+  <Accordion title="Linux (Recommended)">
+    - Ubuntu 20.04 LTS or later
+    - Debian 11 or later
+    - CentOS 8 or later
+    - Any modern Linux distribution with Docker support
+  </Accordion>
+  
+  <Accordion title="Windows">
+    - Windows 10/11 with WSL2
+    - Windows Server 2019 or later
+    - Docker Desktop for Windows
+  </Accordion>
+  
+  <Accordion title="macOS">
+    - macOS 11 (Big Sur) or later
+    - Docker Desktop for Mac
+  </Accordion>
+</AccordionGroup>
+
+## Required Software
+
+### .NET SDK
+
+<Steps>
+  <Step title="Install .NET 10.0 SDK">
+    Masar Eagle requires .NET SDK version **10.0.100-rc.1.25451.107** or later.
+    
+    ```bash
+    # Download and install .NET 10.0 SDK
+    wget https://dotnet.microsoft.com/download/dotnet/10.0
+    
+    # Verify installation
+    dotnet --version
+    # Expected output: 10.0.100-rc.1.25451.107 or later
+    ```
+    
+    <Note>
+      The project uses preview releases with `rollForward: latestPatch` and `allowPrerelease: true` configured in `global.json`.
+    </Note>
+  </Step>
+  
+  <Step title="Verify SDK Installation">
+    ```bash
+    dotnet --list-sdks
+    ```
+    
+    You should see .NET 10.0.100-rc.1 or later in the output.
+  </Step>
+</Steps>
+
+### Docker
+
+<Steps>
+  <Step title="Install Docker Engine">
+    Docker is required for containerization and orchestration.
+    
+    <CodeGroup>
+    ```bash Linux
+    # Ubuntu/Debian
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sudo sh get-docker.sh
+    
+    # Start Docker service
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    ```
+    
+    ```bash macOS
+    # Install Docker Desktop for Mac
+    brew install --cask docker
+    ```
+    
+    ```powershell Windows
+    # Install Docker Desktop for Windows
+    # Download from: https://www.docker.com/products/docker-desktop
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Install Docker Compose">
+    ```bash
+    # Docker Compose v2 (comes with Docker Desktop)
+    docker compose version
+    
+    # If not available, install manually
+    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    ```
+  </Step>
+  
+  <Step title="Verify Docker Installation">
+    ```bash
+    docker --version
+    docker compose version
+    
+    # Test Docker
+    docker run hello-world
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Ensure your user has permission to run Docker commands. On Linux, add your user to the `docker` group:
+  
+  ```bash
+  sudo usermod -aG docker $USER
+  newgrp docker
+  ```
+</Warning>
+
+### PostgreSQL
+
+<Steps>
+  <Step title="Version Requirements">
+    - **PostgreSQL 14+** is required
+    - PostgreSQL 15 or 16 is recommended for production
+  </Step>
+  
+  <Step title="Installation Options">
+    <Tabs>
+      <Tab title="Docker (Recommended)">
+        PostgreSQL will be automatically provisioned via .NET Aspire:
+        
+        ```bash
+        # No manual installation needed
+        # Aspire will create PostgreSQL containers automatically
+        ```
+        
+        The AppHost configuration includes:
+        - PostgreSQL server with pgAdmin on port 5050
+        - Automatic database creation for all services
+        - Data persistence with Docker volumes
+      </Tab>
+      
+      <Tab title="Native Installation">
+        ```bash Linux
+        # Ubuntu/Debian
+        sudo apt update
+        sudo apt install postgresql postgresql-contrib
+        
+        # Start PostgreSQL
+        sudo systemctl start postgresql
+        sudo systemctl enable postgresql
+        ```
+        
+        ```bash macOS
+        # Using Homebrew
+        brew install postgresql@16
+        brew services start postgresql@16
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+### RabbitMQ
+
+<Steps>
+  <Step title="Version Requirements">
+    - **RabbitMQ 3.12+** is required
+    - Management plugin should be enabled
+  </Step>
+  
+  <Step title="Installation">
+    <Tabs>
+      <Tab title="Docker (Recommended)">
+        RabbitMQ will be automatically provisioned via .NET Aspire:
+        
+        ```bash
+        # Aspire configuration includes:
+        # - RabbitMQ with management plugin
+        # - Default credentials: guest/guest
+        # - Management UI available
+        ```
+      </Tab>
+      
+      <Tab title="Native Installation">
+        ```bash Linux
+        # Ubuntu/Debian
+        sudo apt install rabbitmq-server
+        
+        # Enable management plugin
+        sudo rabbitmq-plugins enable rabbitmq_management
+        
+        # Start RabbitMQ
+        sudo systemctl start rabbitmq-server
+        sudo systemctl enable rabbitmq-server
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+## Database Setup
+
+### Database Requirements
+
+Masar Eagle uses multiple PostgreSQL databases:
+
+<CardGroup cols={2}>
+  <Card title="User Database" icon="users">
+    Stores user profiles, drivers, passengers, and companies
+  </Card>
+  
+  <Card title="Trip Database" icon="route">
+    Manages trips, bookings, and wallet transactions
+  </Card>
+  
+  <Card title="Notifications Database" icon="bell">
+    Handles notifications and device tokens
+  </Card>
+  
+  <Card title="Auth Database" icon="key">
+    Manages authentication with OpenIddict
+  </Card>
+</CardGroup>
+
+<Note>
+  When using .NET Aspire, these databases are created automatically. Manual creation is only needed for native PostgreSQL installations.
+</Note>
+
+## Optional Dependencies
+
+### Development Tools
+
+<AccordionGroup>
+  <Accordion title="Code Editor / IDE">
+    - **Visual Studio 2022** (17.8 or later) - Windows
+    - **Visual Studio Code** with C# extension - All platforms
+    - **JetBrains Rider** - All platforms
+  </Accordion>
+  
+  <Accordion title="Git">
+    ```bash
+    # Verify Git installation
+    git --version
+    
+    # Install if needed
+    sudo apt install git  # Linux
+    brew install git      # macOS
+    ```
+  </Accordion>
+  
+  <Accordion title="Node.js (Optional)">
+    Required for frontend development if working with Aspire dashboard customizations:
+    
+    ```bash
+    # Install Node.js 18+
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt install nodejs
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Monitoring Tools
+
+The following are automatically provisioned via .NET Aspire:
+
+- **Prometheus** (v3.2.1) - Metrics collection
+- **Grafana** - Metrics visualization
+- **Jaeger** - Distributed tracing
+- **Loki** - Log aggregation
+- **OpenTelemetry Collector** - Telemetry pipeline
+
+## Key Dependencies
+
+### Core Packages
+
+<Tabs>
+  <Tab title="Aspire">
+    ```xml
+    Aspire.Hosting.AppHost: 13.0.2
+    Aspire.Hosting.PostgreSQL: 13.0.2
+    Aspire.Hosting.RabbitMQ: 13.0.2
+    Aspire.Hosting.Yarp: 13.0.2
+    ```
+  </Tab>
+  
+  <Tab title="Database">
+    ```xml
+    Npgsql: 10.0.0
+    linq2db: 5.4.0
+    FluentMigrator: 7.1.0
+    EntityFrameworkCore: 10.0.0 (Identity only)
+    ```
+  </Tab>
+  
+  <Tab title="Messaging">
+    ```xml
+    WolverineFx: 5.0.0
+    WolverineFx.RabbitMQ: 5.0.0
+    WolverineFx.Postgresql: 5.0.0
+    ```
+  </Tab>
+  
+  <Tab title="Authentication">
+    ```xml
+    OpenIddict: 6.2.0
+    OpenIddict.AspNetCore: 6.2.0
+    OpenIddict.EntityFrameworkCore: 6.2.0
+    JWT Bearer: 10.0.0-preview.1.25120.3
+    ```
+  </Tab>
+</Tabs>
+
+## Network Requirements
+
+### Ports
+
+Ensure the following ports are available:
+
+| Service | Port | Description |
+|---------|------|-------------|
+| Gateway | 8080 | API Gateway (YARP) |
+| Identity | 8080 | Identity Service |
+| Users | 8080 | Users Service |
+| Trips | 8080 | Trips Service |
+| Notifications | 8080 | Notifications Service |
+| PostgreSQL | 5432 | Database Server |
+| pgAdmin | 5050 | PostgreSQL Admin UI |
+| RabbitMQ | 5672 | AMQP Protocol |
+| RabbitMQ Mgmt | 15672 | Management UI |
+| Aspire Dashboard | 8080 | Orchestration Dashboard |
+| Prometheus | 9090 | Metrics |
+| Grafana | 3000 | Visualization |
+| Jaeger | 16686 | Tracing UI |
+| Loki | 3100 | Logs |
+
+<Warning>
+  If any ports are already in use, modify the port mappings in `AppHost.cs` before running the application.
+</Warning>
+
+## Verification
+
+Run the following commands to verify all prerequisites are met:
+
+```bash
+#!/bin/bash
+
+echo "Checking prerequisites..."
+
+# Check .NET SDK
+if command -v dotnet &> /dev/null; then
+    echo "✓ .NET SDK: $(dotnet --version)"
+else
+    echo "✗ .NET SDK not found"
+fi
+
+# Check Docker
+if command -v docker &> /dev/null; then
+    echo "✓ Docker: $(docker --version)"
+else
+    echo "✗ Docker not found"
+fi
+
+# Check Docker Compose
+if docker compose version &> /dev/null; then
+    echo "✓ Docker Compose: $(docker compose version)"
+else
+    echo "✗ Docker Compose not found"
+fi
+
+# Check Git
+if command -v git &> /dev/null; then
+    echo "✓ Git: $(git --version)"
+else
+    echo "✗ Git not found"
+fi
+
+echo "\nPrerequisite check complete!"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/setup/installation">
+    Install Masar Eagle on your system
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/setup/configuration">
+    Configure environment variables and settings
+  </Card>
+</CardGroup>

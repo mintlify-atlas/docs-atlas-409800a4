@@ -1,0 +1,663 @@
+---
+title: 'Error Handling'
+description: 'Understanding API error responses and how to handle them'
+icon: 'triangle-exclamation'
+---
+
+## Overview
+
+The Masar Eagle API uses standard HTTP status codes and structured error responses to communicate errors. All services implement consistent error handling through the `GlobalExceptionMiddleware`.
+
+## Error Response Format
+
+All error responses follow the **RFC 7807 Problem Details** specification:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "Invalid request data",
+  "status": 400,
+  "detail": "Phone number is required and cannot be null",
+  "instance": "/api/auth/send-otp",
+  "errorId": "A1B2C3D4E5F6",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+
+### Response Fields
+
+<ResponseField name="type" type="string">
+  URI reference identifying the error type (RFC 7807 compliant)
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Short, human-readable summary of the error
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  HTTP status code
+</ResponseField>
+
+<ResponseField name="detail" type="string">
+  Detailed explanation of the error (may include Arabic messages)
+</ResponseField>
+
+<ResponseField name="instance" type="string">
+  URI reference to the specific request that caused the error
+</ResponseField>
+
+<ResponseField name="errorId" type="string">
+  Unique error identifier for tracking and support (16 character alphanumeric)
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp when the error occurred
+</ResponseField>
+
+<ResponseField name="extensions" type="object">
+  Additional error-specific metadata (development mode only)
+</ResponseField>
+
+## HTTP Status Codes
+
+The API uses standard HTTP status codes:
+
+### 2xx Success
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 200 | OK | Request succeeded, response body contains data |
+| 201 | Created | Resource successfully created |
+| 204 | No Content | Request succeeded, no response body |
+
+### 4xx Client Errors
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 400 | Bad Request | Invalid request data, validation error, or malformed JSON |
+| 401 | Unauthorized | Authentication required or token invalid/expired |
+| 403 | Forbidden | Authenticated but insufficient permissions |
+| 404 | Not Found | Resource not found |
+| 409 | Conflict | Resource conflict (e.g., duplicate phone number) |
+
+### 5xx Server Errors
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 500 | Internal Server Error | Unexpected server error |
+| 501 | Not Implemented | Feature not yet implemented |
+| 502 | Bad Gateway | Error connecting to backend service |
+| 504 | Gateway Timeout | Request timeout |
+
+## Error Categories
+
+Errors are categorized for easier handling and monitoring:
+
+<CardGroup cols={2}>
+  <Card title="Validation Errors" icon="circle-exclamation">
+    **Category**: `ValidationError`
+    
+    **Status**: 400
+    
+    **Cause**: Invalid input, missing required fields, format errors
+  </Card>
+  
+  <Card title="Authentication Errors" icon="key">
+    **Category**: `AuthenticationError`
+    
+    **Status**: 401
+    
+    **Cause**: Invalid credentials, expired token, missing authentication
+  </Card>
+  
+  <Card title="Authorization Errors" icon="shield-halved">
+    **Category**: `AuthorizationError`
+    
+    **Status**: 403
+    
+    **Cause**: Insufficient permissions for the requested operation
+  </Card>
+  
+  <Card title="Not Found Errors" icon="magnifying-glass">
+    **Category**: `NotFoundError`
+    
+    **Status**: 404
+    
+    **Cause**: Requested resource doesn't exist
+  </Card>
+  
+  <Card title="Business Logic Errors" icon="briefcase">
+    **Category**: `BusinessLogicError`
+    
+    **Status**: 400
+    
+    **Cause**: Operation violates business rules
+  </Card>
+  
+  <Card title="External Service Errors" icon="cloud">
+    **Category**: `ExternalServiceError`
+    
+    **Status**: 502
+    
+    **Cause**: Failure communicating with external services
+  </Card>
+</CardGroup>
+
+## Common Error Responses
+
+### Validation Errors (400)
+
+<Accordion title="Missing Required Field">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "Required data missing",
+  "status": 400,
+  "detail": "Parameter 'phoneNumber' is required and cannot be null",
+  "instance": "/api/auth/send-otp",
+  "errorId": "A1B2C3D4E5F6",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+<Accordion title="Invalid Format">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "Invalid request data",
+  "status": 400,
+  "detail": "رقم الهاتف يجب أن يكون بصيغة صحيحة",
+  "instance": "/api/auth/send-otp",
+  "errorId": "B2C3D4E5F6G7",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+<Accordion title="Validation Error with Multiple Fields">
+```json
+{
+  "status": 400,
+  "title": "Validation failed",
+  "errors": [
+    {
+      "field": "phoneNumber",
+      "message": "Phone number must be in E.164 format",
+      "code": "VAL_INVALID_PHONE"
+    },
+    {
+      "field": "email",
+      "message": "Email address is invalid",
+      "code": "VAL_INVALID_EMAIL"
+    }
+  ]
+}
+```
+</Accordion>
+
+### Authentication Errors (401)
+
+<Accordion title="Missing Token">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7235#section-3.1",
+  "title": "Unauthorized access",
+  "status": 401,
+  "detail": "You need to be authenticated to access this resource",
+  "instance": "/api/drivers/me",
+  "errorId": "C3D4E5F6G7H8",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+<Accordion title="Invalid Token">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7235#section-3.1",
+  "title": "User not found",
+  "status": 401,
+  "detail": "The authentication token is invalid or has been revoked",
+  "instance": "/api/drivers/me",
+  "errorId": "D4E5F6G7H8I9",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+<Accordion title="Expired Token">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7235#section-3.1",
+  "title": "User not found",
+  "status": 401,
+  "detail": "Your session has expired. Please log in again.",
+  "instance": "/api/drivers/me",
+  "errorId": "E5F6G7H8I9J0",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+### Authorization Errors (403)
+
+<Accordion title="Insufficient Permissions">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.3",
+  "title": "User not authorized",
+  "status": 403,
+  "detail": "You do not have permission to access this resource",
+  "instance": "/api/admin/drivers",
+  "errorId": "F6G7H8I9J0K1",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+### Not Found Errors (404)
+
+<Accordion title="Resource Not Found">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+  "title": "Resource not found",
+  "status": 404,
+  "detail": "The requested resource was not found",
+  "instance": "/api/drivers/123e4567-e89b-12d3-a456-426614174000",
+  "errorId": "G7H8I9J0K1L2",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+### Server Errors (5xx)
+
+<Accordion title="Internal Server Error">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+  "title": "An unexpected error occurred",
+  "status": 500,
+  "detail": "Please try again later or contact support",
+  "instance": "/api/trips",
+  "errorId": "H8I9J0K1L2M3",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+
+**Development Mode Response** (includes stack trace):
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+  "title": "An unexpected error occurred",
+  "status": 500,
+  "detail": "Object reference not set to an instance of an object",
+  "instance": "/api/trips",
+  "errorId": "H8I9J0K1L2M3",
+  "timestamp": "2024-03-10T14:30:00.000Z",
+  "exceptionType": "System.NullReferenceException",
+  "stackTrace": "   at TripService.GetTrip(Guid id) in /src/TripService.cs:line 42\n...",
+  "source": "Trips.Api"
+}
+```
+</Accordion>
+
+<Accordion title="Bad Gateway">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.6.3",
+  "title": "Service connection error",
+  "status": 502,
+  "detail": "An error occurred while connecting to an external service",
+  "instance": "/api/trips",
+  "errorId": "I9J0K1L2M3N4",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+<Accordion title="Gateway Timeout">
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.6.5",
+  "title": "Request timeout",
+  "status": 504,
+  "detail": "The request took longer than expected",
+  "instance": "/api/trips",
+  "errorId": "J0K1L2M3N4O5",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</Accordion>
+
+## Error Codes Reference
+
+Some services return structured error codes in addition to HTTP status codes:
+
+### Authentication Error Codes
+
+| Code | Description |
+|------|-------------|
+| `AUTH_INVALID_CREDENTIALS` | Invalid email or password |
+| `AUTH_INVALID_TOKEN` | Token is malformed or invalid |
+| `AUTH_TOKEN_EXPIRED` | Token has expired |
+| `AUTH_UNAUTHORIZED` | User is not authorized |
+| `AUTH_USER_NOT_FOUND` | User account not found |
+| `AUTH_PHONE_NOT_REGISTERED` | Phone number not registered |
+
+### OTP Error Codes
+
+| Code | Description |
+|------|-------------|
+| `OTP_INVALID` | OTP code is incorrect |
+| `OTP_EXPIRED` | OTP code has expired (5 minutes) |
+| `OTP_SEND_FAILED` | Failed to send SMS |
+| `OTP_TOO_MANY_ATTEMPTS` | Exceeded maximum verification attempts (5) |
+| `OTP_NO_CODE_TO_RESEND` | No active OTP to resend |
+
+### Validation Error Codes
+
+| Code | Description |
+|------|-------------|
+| `VAL_VALIDATION_FAILED` | General validation failure |
+| `VAL_INVALID_EMAIL` | Email format is invalid |
+| `VAL_INVALID_PHONE` | Phone number format is invalid |
+| `VAL_INVALID_PASSWORD` | Password doesn't meet requirements |
+| `VAL_INVALID_JSON` | Request body is not valid JSON |
+
+### Resource Error Codes
+
+| Code | Description |
+|------|-------------|
+| `NF_USER_NOT_FOUND` | User not found |
+| `NF_PASSENGER_NOT_FOUND` | Passenger not found |
+| `NF_DRIVER_NOT_FOUND` | Driver not found |
+| `NF_VEHICLE_NOT_FOUND` | Vehicle not found |
+| `NF_RESOURCE_NOT_FOUND` | Generic resource not found |
+
+### Duplicate Error Codes
+
+| Code | Description |
+|------|-------------|
+| `DUP_EMAIL_EXISTS` | Email already registered |
+| `DUP_PHONE_EXISTS` | Phone number already registered |
+| `DUP_VEHICLE_NAME_EXISTS` | Vehicle name already exists |
+
+## Error Handling Best Practices
+
+### 1. Handle Errors by Status Code
+
+<CodeGroup>
+```javascript JavaScript
+async function handleAPIRequest(url, options) {
+  try {
+    const response = await fetch(url, options);
+    
+    if (!response.ok) {
+      const error = await response.json();
+      
+      switch (response.status) {
+        case 400:
+          // Validation error - show to user
+          showValidationError(error.detail);
+          break;
+          
+        case 401:
+          // Unauthorized - refresh token or redirect to login
+          await refreshToken();
+          break;
+          
+        case 403:
+          // Forbidden - show permission error
+          showPermissionError();
+          break;
+          
+        case 404:
+          // Not found - show not found message
+          showNotFoundError();
+          break;
+          
+        case 429:
+          // Rate limited - retry after delay
+          const retryAfter = response.headers.get('Retry-After') || 60;
+          await sleep(retryAfter * 1000);
+          return handleAPIRequest(url, options);
+          
+        case 500:
+        case 502:
+        case 503:
+        case 504:
+          // Server error - log error ID and show generic message
+          console.error(`Server error ${error.errorId}`);
+          showServerError(error.errorId);
+          break;
+          
+        default:
+          // Unknown error
+          showGenericError();
+      }
+      
+      throw new Error(error.detail);
+    }
+    
+    return response.json();
+  } catch (error) {
+    // Network error or parsing error
+    console.error('Request failed:', error);
+    showNetworkError();
+    throw error;
+  }
+}
+```
+
+```python Python
+import requests
+from typing import Dict, Any
+
+class APIError(Exception):
+    def __init__(self, status: int, detail: str, error_id: str = None):
+        self.status = status
+        self.detail = detail
+        self.error_id = error_id
+        super().__init__(detail)
+
+def handle_api_request(url: str, **kwargs) -> Dict[str, Any]:
+    try:
+        response = requests.request(url=url, **kwargs)
+        
+        if not response.ok:
+            error = response.json()
+            error_id = error.get('errorId')
+            detail = error.get('detail', 'Unknown error')
+            
+            if response.status_code == 400:
+                # Validation error
+                raise APIError(400, detail, error_id)
+            
+            elif response.status_code == 401:
+                # Unauthorized - refresh token
+                refresh_token()
+                return handle_api_request(url, **kwargs)
+            
+            elif response.status_code == 403:
+                # Forbidden
+                raise APIError(403, detail, error_id)
+            
+            elif response.status_code == 404:
+                # Not found
+                raise APIError(404, detail, error_id)
+            
+            elif response.status_code >= 500:
+                # Server error - log error ID
+                print(f"Server error {error_id}: {detail}")
+                raise APIError(response.status_code, detail, error_id)
+            
+            else:
+                raise APIError(response.status_code, detail, error_id)
+        
+        return response.json()
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Network error: {e}")
+        raise
+```
+</CodeGroup>
+
+### 2. Log Error IDs for Support
+
+Always log the `errorId` for 5xx errors to help with troubleshooting:
+
+<CodeGroup>
+```javascript JavaScript
+function logError(error) {
+  if (error.status >= 500 && error.errorId) {
+    // Send to logging service
+    analytics.track('API Error', {
+      errorId: error.errorId,
+      status: error.status,
+      endpoint: error.instance,
+      timestamp: error.timestamp,
+      userId: getCurrentUserId()
+    });
+    
+    // Show error ID to user for support
+    console.error(`Error ID: ${error.errorId}`);
+  }
+}
+```
+</CodeGroup>
+
+### 3. Handle Authentication Errors
+
+Automatically refresh tokens or redirect to login:
+
+<CodeGroup>
+```javascript JavaScript
+class APIClient {
+  async request(url, options) {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        'Authorization': `Bearer ${this.accessToken}`
+      }
+    });
+    
+    if (response.status === 401) {
+      // Try refreshing the token
+      const refreshed = await this.refreshToken();
+      
+      if (refreshed) {
+        // Retry with new token
+        return this.request(url, options);
+      } else {
+        // Refresh failed - redirect to login
+        window.location.href = '/login';
+        throw new Error('Session expired');
+      }
+    }
+    
+    return response;
+  }
+}
+```
+</CodeGroup>
+
+### 4. Display User-Friendly Messages
+
+Translate error messages for users:
+
+<CodeGroup>
+```javascript JavaScript
+const errorMessages = {
+  'ar': {
+    'AUTH_INVALID_CREDENTIALS': 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
+    'OTP_EXPIRED': 'انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد',
+    'NF_DRIVER_NOT_FOUND': 'لم يتم العثور على السائق',
+    'SERVER_ERROR': 'حدث خطأ في الخادم. يرجى المحاولة مرة أخرى'
+  },
+  'en': {
+    'AUTH_INVALID_CREDENTIALS': 'Invalid email or password',
+    'OTP_EXPIRED': 'OTP code has expired. Please request a new one',
+    'NF_DRIVER_NOT_FOUND': 'Driver not found',
+    'SERVER_ERROR': 'A server error occurred. Please try again'
+  }
+};
+
+function showError(errorCode, language = 'ar') {
+  const message = errorMessages[language][errorCode] 
+    || errorMessages[language]['SERVER_ERROR'];
+  
+  // Show to user
+  alert(message);
+}
+```
+</CodeGroup>
+
+### 5. Implement Retry Logic
+
+Retry failed requests with exponential backoff:
+
+<CodeGroup>
+```javascript JavaScript
+async function requestWithRetry(url, options, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      
+      // Don't retry on client errors (except 429)
+      if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+        return response;
+      }
+      
+      // Retry on 5xx or 429
+      if (response.status >= 500 || response.status === 429) {
+        if (attempt < maxRetries - 1) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.log(`Retrying after ${delay}ms...`);
+          await sleep(delay);
+          continue;
+        }
+      }
+      
+      return response;
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error;
+      
+      const delay = Math.pow(2, attempt) * 1000;
+      await sleep(delay);
+    }
+  }
+}
+```
+</CodeGroup>
+
+## Error Monitoring
+
+All errors are automatically logged with the following information:
+
+- **Error ID**: Unique identifier for tracking
+- **Exception Type**: Type of exception thrown
+- **Request Path**: Endpoint that caused the error
+- **User ID**: Authenticated user (if available)
+- **Trace ID**: Request trace identifier
+- **Stack Trace**: Full stack trace (development only)
+- **Duration**: Time taken before error occurred
+
+<Info>
+For production support, always provide the **Error ID** when reporting issues. This allows the support team to quickly locate the error in logs.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Overview" icon="compass" href="/api/overview">
+    Learn about API structure and conventions
+  </Card>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Understand authentication flows
+  </Card>
+</CardGroup>

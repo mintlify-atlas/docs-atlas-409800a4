@@ -1,0 +1,476 @@
+---
+title: 'Booking System'
+description: 'Complete booking flow including seat reservation, payment processing, and booking management'
+icon: 'ticket'
+---
+
+## Overview
+
+The booking system handles the complete lifecycle of trip reservations, from initial seat requests to confirmation and completion. It supports multiple payment methods and manages seat availability in real-time.
+
+## Booking Flow
+
+<Steps>
+  <Step title="Search for Trips">
+    Passengers search for available trips based on route and date preferences.
+  </Step>
+  
+  <Step title="Select Trip">
+    Choose a trip and specify the number of seats needed.
+  </Step>
+  
+  <Step title="Choose Payment Method">
+    Select from available payment options: Cash, Wallet, Bank Transfer, or Moyasar.
+  </Step>
+  
+  <Step title="Submit Booking Request">
+    Create a pending booking that requires driver approval.
+  </Step>
+  
+  <Step title="Driver Reviews">
+    Driver accepts or rejects the booking request.
+  </Step>
+  
+  <Step title="Confirmation">
+    Upon acceptance, booking is confirmed and payment is processed.
+  </Step>
+</Steps>
+
+## Creating a Booking
+
+### API Endpoints
+
+There are two booking endpoints:
+
+<CardGroup cols={2}>
+  <Card title="JSON Endpoint" icon="code">
+    ```http
+    POST /api/trips/{tripId}/book-seat
+    ```
+    For simple bookings without image uploads.
+  </Card>
+  
+  <Card title="Form Data Endpoint" icon="image">
+    ```http
+    POST /api/v1/trips/{tripId}/book-seat
+    ```
+    Supports bank transfer receipt image upload.
+  </Card>
+</CardGroup>
+
+### Request Body (JSON)
+
+```json
+{
+  "passengerId": "p_123456",
+  "requestedSeatsCount": 2,
+  "paymentMethod": "Wallet",
+  "bankTransferData": null
+}
+```
+
+### Request Body (Form Data with Receipt)
+
+```multipart
+passengerId: p_123456
+requestedSeatsCount: 2
+paymentMethod: BankTransfer
+bankAccountId: ba_789012
+note: Transfer completed on 2026-03-10
+receiptImage: [image file]
+```
+
+### Implementation
+
+The booking handler performs comprehensive validation and transaction management:
+
+```csharp src/services/Trips/Trips.Api/Features/BookSeat/BookSeatHandler.cs
+public async Task<BookSeatResponse> Handle(BookSeatCommand request, CancellationToken cancellationToken)
+{
+    Trip trip = await tripRepository.GetAsync(request.TripId, cancellationToken)
+                ?? throw new ArgumentException("الرحلة غير موجودة");
+
+    if (!string.Equals(trip.Status?.Trim(), TripStatuses.Scheduled, StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("لا يمكن حجز مقعد في رحلة غير مجدولة");
+    }
+
+    int clampedAvailable = Math.Min(Math.Max(trip.AvailableSeatCount, 0), trip.TotalSeats);
+    int clampedReserved = Math.Min(Math.Max(trip.ReservedSeatCount, 0), trip.TotalSeats);
+    int availableForBooking = Math.Max(0, clampedAvailable - clampedReserved);
+    
+    if (availableForBooking < request.RequestedSeatsCount)
+    {
+        throw new InvalidOperationException("عدد المقاعد المتاحة غير كافٍ لإتمام الحجز");
+    }
+```
+
+### Seat Management
+
+Seats are reserved immediately upon booking request to prevent double-booking:
+
+```csharp src/services/Trips/Trips.Api/Features/BookSeat/BookSeatHandler.cs
+trip.ReservedSeatCount += request.RequestedSeatsCount;
+logger.LogInformation("Created booking {BookingId} with {RequestedSeatsCount} requested seats", 
+    bookingId, bookingMaster.RequestedSeatsCount);
+```
+
+<Warning>
+Reserved seats are held even for pending bookings. If a booking is rejected, seats are automatically released back to the available pool.
+</Warning>
+
+## Payment Methods
+
+The system supports four payment methods:
+
+### 1. Cash Payment
+
+```json
+{
+  "paymentMethod": "Cash"
+}
+```
+
+Payment collected in person by the driver during the trip.
+
+### 2. Wallet Payment
+
+Deducts from passenger's wallet balance immediately upon driver acceptance:
+
+```json
+{
+  "paymentMethod": "Wallet"
+}
+```
+
+**Validation:**
+```csharp src/services/Trips/Trips.Api/Features/BookSeat/BookSeatHandler.cs
+if (paymentMethod == PaymentMethods.Wallet)
+{
+    await BookingPaymentValidator.ValidateWalletBalanceAsync(
+        request.PassengerId, tripCurrency, totalPrice,
+        passengerWalletRepository, cancellationToken);
+}
+```
+
+### 3. Bank Transfer
+
+Passengers upload a receipt for admin verification:
+
+```json
+{
+  "paymentMethod": "BankTransfer",
+  "bankTransferData": {
+    "bankAccountId": "ba_789012",
+    "note": "Transfer completed on 2026-03-10",
+    "receiptImageUrl": "https://storage.example.com/receipts/abc123.jpg"
+  }
+}
+```
+
+**Receipt Upload Validation:**
+```csharp src/services/Trips/Trips.Api/Features/BookSeat/BookSeatEndpoint.cs
+string[] allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+string extension = Path.GetExtension(receiptImage.FileName).ToLowerInvariant();
+
+if (!allowedExtensions.Contains(extension))
+{
+    return Results.BadRequest(new BookSeatResponse
+    {
+        Success = false,
+        Message = "نوع الملف غير مدعوم. الأنواع المسموح بها: JPG, JPEG, PNG, GIF, WEBP"
+    });
+}
+
+if (receiptImage.Length > 10 * 1024 * 1024)
+{
+    return Results.BadRequest(new BookSeatResponse
+    {
+        Success = false,
+        Message = "حجم الملف كبير جداً. الحد الأقصى 10 ميجابايت"
+    });
+}
+```
+
+### 4. Moyasar Payment Gateway
+
+Integration with Moyasar for online credit/debit card payments:
+
+```json
+{
+  "paymentMethod": "Moyasar"
+}
+```
+
+**Response includes payment order:**
+```json
+{
+  "success": true,
+  "bookingId": "b_abc123",
+  "paymentOrderId": "po_xyz789",
+  "publishableKey": "pk_test_...",
+  "requiresPayment": true,
+  "message": "تم إرسال طلب الحجز بنجاح. يرجى إتمام الدفع عبر Moyasar لإكمال الحجز"
+}
+```
+
+## Transaction Management
+
+Bookings use database transactions to ensure data consistency:
+
+```csharp src/services/Trips/Trips.Api/Features/BookSeat/BookSeatHandler.cs
+using (DataConnectionTransaction transaction = await db.BeginTransactionAsync(cancellationToken))
+{
+    try
+    {
+        await bookingRepository.AddBookingAsync(bookingMaster, cancellationToken);
+        await tripRepository.UpdateAsync(trip, cancellationToken);
+
+        if (paymentMethod == PaymentMethods.Moyasar)
+        {
+            var paymentOrder = new PaymentOrder { /* ... */ };
+            await paymentOrderRepository.CreatePaymentOrderAsync(paymentOrder, cancellationToken);
+        }
+
+        if (paymentMethod == PaymentMethods.BankTransfer)
+        {
+            var bankTransfer = new BankTransfer { /* ... */ };
+            await bankTransferRepository.AddBankTransferAsync(bankTransfer, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        await transaction.RollbackAsync(cancellationToken);
+        trip.ReservedSeatCount -= request.RequestedSeatsCount;
+        throw;
+    }
+}
+```
+
+## Driver Booking Management
+
+### View Booking Requests
+
+Drivers can view all pending booking requests:
+
+```http
+GET /api/bookings/driver/{driverId}
+```
+
+### Accept Booking
+
+```http
+POST /api/bookings/{bookingId}/accept
+```
+
+```json
+{
+  "driverId": "d_789012",
+  "driverNotes": "Welcome aboard!"
+}
+```
+
+**Acceptance Handler:**
+```csharp src/services/Trips/Trips.Api/Features/ManageBookings/AcceptBooking/AcceptBookingHandler.cs
+public async Task<AcceptBookingResponse> Handle(AcceptBookingCommand request, CancellationToken cancellationToken)
+{
+    Booking? booking = await bookingRepository.GetBookingAsync(request.BookingId, cancellationToken);
+    
+    if (booking.Status != BookingStatuses.Pending)
+    {
+        return new AcceptBookingResponse { 
+            Success = false, 
+            Message = "لا يمكن قبول طلب حجز غير معلق" 
+        };
+    }
+
+    var context = new BookingAcceptanceContext(
+        booking, trip,
+        PerformedById: request.DriverId,
+        PerformedByType: PerformedByTypes.User,
+        DriverNotes: request.DriverNotes ?? string.Empty,
+        RejectionReason: request.Reason);
+
+    BookingAcceptanceResult result = await acceptanceService.ProcessAcceptanceAsync(context, cancellationToken);
+    
+    // Payment processing and wallet updates happen here
+}
+```
+
+### Reject Booking
+
+```http
+POST /api/bookings/{bookingId}/reject
+```
+
+```json
+{
+  "reason": "Trip is fully booked"
+}
+```
+
+### Cancel Booking
+
+Passengers can cancel their own bookings:
+
+```http
+POST /api/bookings/{bookingId}/cancel
+```
+
+<Note>
+Cancellation policies and refund rules are applied based on the time remaining until trip departure.
+</Note>
+
+## Booking Statuses
+
+Bookings progress through these statuses:
+
+<Steps>
+  <Step title="Pending">
+    Initial state after booking request. Awaiting driver approval.
+  </Step>
+  
+  <Step title="Confirmed">
+    Driver has accepted the booking. Payment processed (if applicable).
+  </Step>
+  
+  <Step title="Completed">
+    Trip has finished successfully.
+  </Step>
+  
+  <Step title="Rejected">
+    Driver declined the booking request.
+  </Step>
+  
+  <Step title="Cancelled">
+    Booking was cancelled by passenger, driver, or admin.
+  </Step>
+</Steps>
+
+## Notifications
+
+The system sends notifications at key booking events:
+
+```csharp src/services/Trips/Trips.Api/Features/BookSeat/BookSeatHandler.cs
+if (paymentMethod != PaymentMethods.Moyasar)
+{
+    var notification = new BookingCreatedNotification(
+        bookingMaster.Id,
+        trip.Id,
+        trip.DriverId,
+        request.PassengerId,
+        bookingMaster.PassengerName,
+        request.RequestedSeatsCount,
+        totalPrice,
+        trip.From,
+        trip.To,
+        trip.DepartureTimeUtc);
+    await messageBus.PublishAsync(notification);
+}
+```
+
+### Wallet Deduction Notification
+
+```csharp src/services/Trips/Trips.Api/Features/ManageBookings/AcceptBooking/AcceptBookingHandler.cs
+if (result.PaymentBranch == "Wallet" && result.PassengerWalletResult != null)
+{
+    var walletNotification = new WalletDeductedNotification(
+        booking.Id, trip.Id, booking.PassengerId,
+        booking.TotalPrice, tripCurrency, result.PassengerWalletResult.BalanceAfter,
+        trip.From, trip.To);
+    await messageBus.PublishAsync(walletNotification);
+}
+```
+
+## Admin Booking Operations
+
+Administrators have full control over bookings:
+
+### View All Requests
+
+```http
+GET /api/admin/trips/{tripId}/requests?status=Pending
+```
+
+### Approve Pending Bookings
+
+```http
+POST /api/admin/trips/{tripId}/requests/{bookingId}/accept
+```
+
+### Add Passenger Directly
+
+```http
+POST /api/admin/trips/{tripId}/passengers
+```
+
+```json
+{
+  "passengerId": "p_123456",
+  "requestedSeatsCount": 1,
+  "paymentMethod": "Cash",
+  "notes": "Special request from customer service"
+}
+```
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="Insufficient Seats">
+    ```json
+    {
+      "success": false,
+      "message": "عدد المقاعد المتاحة غير كافٍ لإتمام الحجز"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Insufficient Wallet Balance">
+    ```json
+    {
+      "success": false,
+      "message": "رصيد المحفظة غير كافٍ. الرصيد الحالي: 100 SAR، المطلوب: 250 SAR"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Trip Not Scheduled">
+    ```json
+    {
+      "success": false,
+      "message": "لا يمكن حجز مقعد في رحلة غير مجدولة"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Receipt Format">
+    ```json
+    {
+      "success": false,
+      "message": "نوع الملف غير مدعوم. الأنواع المسموح بها: JPG, JPEG, PNG, GIF, WEBP"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Reserve Early" icon="clock">
+    Book seats early to ensure availability, especially for popular routes.
+  </Card>
+  
+  <Card title="Choose Payment Wisely" icon="credit-card">
+    Use wallet payment for instant confirmation. Bank transfers require admin approval.
+  </Card>
+  
+  <Card title="Upload Clear Receipts" icon="file-image">
+    When using bank transfer, ensure receipt images are clear and legible.
+  </Card>
+  
+  <Card title="Monitor Status" icon="bell">
+    Check booking status regularly and respond to driver communications promptly.
+  </Card>
+</CardGroup>

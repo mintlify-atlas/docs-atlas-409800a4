@@ -1,0 +1,562 @@
+---
+title: 'Bank Transfers & Wallet Top-Up'
+description: 'Manage bank transfer requests for wallet top-ups and trip payments with admin approval workflow'
+---
+
+## Overview
+
+Bank transfers provide an alternative payment method for users who prefer traditional banking. The system supports wallet top-ups and trip payment transfers with admin verification and approval.
+
+---
+
+## Request Wallet Top-Up
+
+Submit a bank transfer receipt to request wallet top-up.
+
+```bash
+POST /api/wallet/top-up/bank-transfer
+```
+
+<Note>
+This endpoint accepts `multipart/form-data` for file upload. Users must upload a receipt image.
+</Note>
+
+### Request Parameters
+
+<ParamField body="bankAccountId" type="string" required>
+  ID of the platform bank account where transfer was sent
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount transferred (can include currency symbols, will be parsed)
+</ParamField>
+
+<ParamField body="note" type="string" required>
+  User's note describing the transfer
+</ParamField>
+
+<ParamField body="receiptImage" type="file">
+  Receipt image file (JPG, JPEG, PNG, GIF, WEBP - max 10MB)
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if request was submitted successfully
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="transferId" type="string">
+  Unique transfer request ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Transfer status (Pending, Approved, Rejected)
+</ResponseField>
+
+### Supported User Types
+
+- **Passenger**: Top up passenger wallet
+- **Driver**: Top up driver wallet
+- **Company**: Top up company wallet
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/wallet/top-up/bank-transfer" \
+  -H "Authorization: Bearer USER_TOKEN" \
+  -F "bankAccountId=bank_acc_123" \
+  -F "amount=500 SAR" \
+  -F "note=Wallet top-up via Al Rajhi Bank" \
+  -F "receiptImage=@/path/to/receipt.jpg"
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "تم إرسال طلب شحن المحفظة للمراجعة. سيتم إشعارك عند الموافقة.",
+  "transferId": "bt_a1b2c3d4e5f6",
+  "status": "Pending"
+}
+```
+
+### Error Responses
+
+**Invalid File Type**:
+```json
+{
+  "success": false,
+  "message": "نوع الملف غير مدعوم. الأنواع المسموح بها: JPG, JPEG, PNG, GIF, WEBP"
+}
+```
+
+**File Too Large**:
+```json
+{
+  "success": false,
+  "message": "حجم الملف كبير جداً. الحد الأقصى 10 ميجابايت"
+}
+```
+
+**Bank Account Not Active**:
+```json
+{
+  "success": false,
+  "message": "الحساب البنكي غير مفعل حالياً"
+}
+```
+
+<Info>
+Receipt images are uploaded to cloud storage in organized folders by year and month. A pending review notification is automatically sent to admins.
+</Info>
+
+---
+
+## Get Pending Bank Transfers (Admin)
+
+Retrieve all pending bank transfer requests awaiting review.
+
+```bash
+GET /api/admin/bank-transfers/pending
+```
+
+### Query Parameters
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="pageSize" type="integer" default="20">
+  Number of items per page (1-100)
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message
+</ResponseField>
+
+<ResponseField name="bankTransfers" type="array">
+  Array of pending transfer requests
+  
+  <Expandable title="transfer object">
+    <ResponseField name="id" type="string" required>
+      Transfer ID
+    </ResponseField>
+    
+    <ResponseField name="userType" type="string">
+      Type of user (Passenger, Driver, Company)
+    </ResponseField>
+    
+    <ResponseField name="userName" type="string">
+      User's name
+    </ResponseField>
+    
+    <ResponseField name="userPhone" type="string">
+      User's phone number
+    </ResponseField>
+    
+    <ResponseField name="transferType" type="string" required>
+      Transfer type (WalletTopUp, BookingPayment)
+    </ResponseField>
+    
+    <ResponseField name="requestedAmount" type="string">
+      Original amount string entered by user
+    </ResponseField>
+    
+    <ResponseField name="amount" type="decimal" required>
+      Parsed transfer amount
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string" required>
+      Currency code
+    </ResponseField>
+    
+    <ResponseField name="note" type="string">
+      User's transfer note
+    </ResponseField>
+    
+    <ResponseField name="receiptImageUrl" type="string">
+      URL to uploaded receipt image
+    </ResponseField>
+    
+    <ResponseField name="bankAccount" type="object">
+      Bank account details where money was sent
+    </ResponseField>
+    
+    <ResponseField name="booking" type="object">
+      Booking details if transfer is for trip payment
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="datetime" required>
+      When transfer request was created
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="pagination" type="object">
+  Pagination metadata
+  
+  <Expandable title="pagination object">
+    <ResponseField name="page" type="integer">
+      Current page
+    </ResponseField>
+    
+    <ResponseField name="pageSize" type="integer">
+      Items per page
+    </ResponseField>
+    
+    <ResponseField name="totalCount" type="integer">
+      Total number of pending transfers
+    </ResponseField>
+    
+    <ResponseField name="totalPages" type="integer">
+      Total pages
+    </ResponseField>
+    
+    <ResponseField name="hasPreviousPage" type="boolean">
+      Has previous page
+    </ResponseField>
+    
+    <ResponseField name="hasNextPage" type="boolean">
+      Has next page
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagle.sa/api/admin/bank-transfers/pending?page=1&pageSize=20" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "message": "تم جلب الحوالات المعلقة بنجاح",
+  "bankTransfers": [
+    {
+      "id": "bt_xyz789",
+      "userType": "Passenger",
+      "userName": "محمد أحمد",
+      "userPhone": "+966501234567",
+      "transferType": "WalletTopUp",
+      "requestedAmount": "500 ريال",
+      "amount": 500.00,
+      "currency": "SAR",
+      "note": "Transferred via Al Rajhi Bank",
+      "receiptImageUrl": "https://storage.masareagle.sa/receipts/2026/03/receipt_xyz.jpg",
+      "bankAccount": {
+        "id": "bank_123",
+        "bankName": "Al Rajhi Bank",
+        "accountNumber": "SA1234567890123456789012",
+        "displayInfo": "Al Rajhi Bank - SA12****9012"
+      },
+      "createdAt": "2026-03-10T08:30:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "pageSize": 20,
+    "totalCount": 5,
+    "totalPages": 1,
+    "hasPreviousPage": false,
+    "hasNextPage": false
+  }
+}
+```
+
+---
+
+## Approve Bank Transfer (Admin)
+
+Approve a pending bank transfer for trip payment.
+
+```bash
+POST /api/admin/bank-transfers/{transferId}/approve
+```
+
+<Warning>
+This endpoint is for trip payment transfers. For wallet top-ups, use the Approve Wallet Top-Up endpoint.
+</Warning>
+
+### Path Parameters
+
+<ParamField path="transferId" type="string" required>
+  The transfer request ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="adminNotes" type="string">
+  Optional admin notes for the approval
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Approval success indicator
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message in Arabic
+</ResponseField>
+
+### Approval Process
+
+1. **Validate Transfer**: Check transfer exists and is pending
+2. **Currency Normalization**: Convert currency symbols to codes
+3. **Passenger Wallet Operations**:
+   - Deposit transfer amount to passenger wallet
+   - Deduct amount for booking payment
+   - Validate sufficient balance (fraud check)
+4. **Driver Wallet Operations**:
+   - Calculate commission
+   - Add booking amount to driver wallet
+5. **Booking Update**: Set payment method to Wallet and confirm booking
+6. **Notifications**: Send approval notifications to passenger and driver
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/bank-transfers/bt_xyz789/approve" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "adminNotes": "Receipt verified - Al Rajhi Bank transfer confirmed"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "تم قبول الحوالة بنجاح"
+}
+```
+
+### Error Responses
+
+**Transfer Not Found**:
+```json
+{
+  "success": false,
+  "message": "الحوالة غير موجودة"
+}
+```
+
+**Not Pending**:
+```json
+{
+  "success": false,
+  "message": "الحوالة ليست في حالة معلقة. الحالة الحالية: Approved"
+}
+```
+
+**Fraud Detected**:
+```json
+{
+  "success": false,
+  "message": "الحوالة مزيفة - الراكب لا يملك رصيد كافي"
+}
+```
+
+<Info>
+The fraud detection works by depositing the amount, then immediately attempting to deduct it. If deduction fails, the transfer is marked as fraudulent and rejected.
+</Info>
+
+---
+
+## Approve Wallet Top-Up (Admin)
+
+Approve a wallet top-up request and add funds to user's wallet.
+
+```bash
+POST /api/admin/wallet-top-up/{transferId}/approve
+```
+
+### Path Parameters
+
+<ParamField path="transferId" type="string" required>
+  The wallet top-up request ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="approvedAmount" type="decimal" required>
+  Amount to add to wallet. Admin can adjust from requested amount.
+</ParamField>
+
+<ParamField body="adminNotes" type="string">
+  Optional admin notes explaining approval or adjustment
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Approval success indicator
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message
+</ResponseField>
+
+<ResponseField name="approvedAmount" type="decimal">
+  Amount approved and added to wallet
+</ResponseField>
+
+<ResponseField name="newBalance" type="decimal">
+  User's new wallet balance
+</ResponseField>
+
+### Wallet Auto-Creation
+
+- **Driver Wallets**: Must exist, will fail if not found
+- **Passenger Wallets**: Must exist, will fail if not found
+- **Company Wallets**: Auto-created if they don't exist
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/wallet-top-up/bt_abc123/approve" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "approvedAmount": 500.00,
+    "adminNotes": "Verified Al Rajhi transfer - receipt matches"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "تم الموافقة على طلب شحن المحفظة وإضافة المبلغ",
+  "approvedAmount": 500.00,
+  "newBalance": 1250.50
+}
+```
+
+### Approval with Amount Adjustment
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/wallet-top-up/bt_abc123/approve" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "approvedAmount": 450.00,
+    "adminNotes": "Adjusted amount - transfer fees deducted"
+  }'
+```
+
+<Note>
+If the approved amount differs from the requested amount, the admin notes should explain the adjustment. The original amount is preserved in the transfer record.
+</Note>
+
+---
+
+## Reject Wallet Top-Up (Admin)
+
+Reject a wallet top-up request with a reason.
+
+```bash
+POST /api/admin/wallet-top-up/{transferId}/reject
+```
+
+### Path Parameters
+
+<ParamField path="transferId" type="string" required>
+  The wallet top-up request ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="rejectionReason" type="string" required>
+  Reason for rejection (required)
+</ParamField>
+
+<ParamField body="adminNotes" type="string">
+  Optional additional admin notes
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Rejection success indicator
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/wallet-top-up/bt_abc123/reject" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rejectionReason": "Receipt image is unclear and cannot be verified",
+    "adminNotes": "Please resubmit with clearer image"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "تم رفض طلب شحن المحفظة"
+}
+```
+
+<Info>
+Rejection notifications are sent to users explaining why their request was denied. Users can submit a new request with corrections.
+</Info>
+
+---
+
+## Transfer Statuses
+
+| Status | Description | Next Actions |
+|--------|-------------|-------------|
+| Pending | Awaiting admin review | Admin can approve or reject |
+| Approved | Transfer verified and funds added | No further action |
+| Rejected | Transfer declined by admin | User can submit new request |
+
+---
+
+## Best Practices
+
+### For Users
+
+1. **Clear Receipt Images**: Ensure transfer receipt shows amount, date, and reference
+2. **Accurate Amount**: Enter the exact amount transferred
+3. **Descriptive Notes**: Mention bank name and transfer method
+4. **Supported Formats**: Use JPG, PNG, or WEBP under 10MB
+
+### For Admins
+
+1. **Verify Receipt Details**: Check amount, bank account, and timestamp
+2. **Cross-Reference**: Match receipt with bank statement
+3. **Document Adjustments**: Always explain amount changes in notes
+4. **Timely Review**: Process requests within 24 hours for better UX
+5. **Fraud Detection**: Watch for duplicate receipts or mismatched amounts
+
+<Tip>
+For high-volume operations, consider implementing OCR (Optical Character Recognition) to auto-extract amount and reference from receipt images.
+</Tip>

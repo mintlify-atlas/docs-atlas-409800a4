@@ -1,0 +1,296 @@
+---
+title: 'Moyasar Payment Integration'
+description: 'Verify and process Moyasar payment gateway transactions for trip bookings'
+---
+
+## Overview
+
+Masar Eagle integrates with Moyasar payment gateway to process online payments for trip bookings. The verification flow ensures payment authenticity before confirming bookings.
+
+<Note>
+Moyasar is a Saudi Arabian payment gateway supporting credit cards, Apple Pay, and STC Pay.
+</Note>
+
+---
+
+## Verify Company Trip Payment
+
+Verify Moyasar payment for a company trip booking and update booking status.
+
+```bash
+POST /api/company-bookings/{bookingId}/verify-payment
+```
+
+### Path Parameters
+
+<ParamField path="bookingId" type="string" required>
+  The booking ID to verify payment for
+</ParamField>
+
+### Request Body
+
+<ParamField body="moyasarPaymentId" type="string" required>
+  The payment ID returned by Moyasar after payment completion
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if payment verification succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="bookingStatus" type="string">
+  Current booking status after verification (Pending, Cancelled, etc.)
+</ResponseField>
+
+<ResponseField name="paymentStatus" type="string">
+  Payment status (Completed, Failed, etc.)
+</ResponseField>
+
+<ResponseField name="amountPaid" type="decimal">
+  Amount paid if payment succeeded
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  Currency of the payment
+</ResponseField>
+
+### Payment Verification Flow
+
+1. **Payment Order Lookup**: System retrieves payment order from database
+2. **Moyasar Verification**: Queries Moyasar API to verify payment status
+3. **Status Check**: Validates payment wasn't already processed
+4. **Booking Update**: Updates booking and trip seat availability
+5. **Notification**: Sends confirmation to company
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/company-bookings/booking_abc123/verify-payment" \
+  -H "Authorization: Bearer USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "moyasarPaymentId": "pay_1a2b3c4d5e6f"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "تم التحقق من الدفع بنجاح. الحجز بانتظار موافقة الشركة",
+  "bookingStatus": "Pending",
+  "paymentStatus": "Completed",
+  "amountPaid": 450.00,
+  "currency": "SAR"
+}
+```
+
+### Failed Payment Response
+
+```json
+{
+  "success": false,
+  "message": "فشل الدفع. يرجى المحاولة مرة أخرى",
+  "bookingStatus": "Cancelled",
+  "paymentStatus": "Failed"
+}
+```
+
+### Expired Payment Response
+
+```json
+{
+  "success": false,
+  "message": "انتهت صلاحية عملية الدفع. يرجى إنشاء حجز جديد",
+  "bookingStatus": "Cancelled",
+  "paymentStatus": "Failed"
+}
+```
+
+### Already Verified Response
+
+```json
+{
+  "success": false,
+  "message": "تم التحقق من هذا الدفع مسبقاً",
+  "paymentStatus": "Completed"
+}
+```
+
+<Info>
+**Post-Verification Actions**:
+- Successful payments increment trip booking count
+- Booking status changes to "Pending" awaiting company approval
+- Company receives notification of new booking
+- Wallet operations are deferred until company approval
+</Info>
+
+---
+
+## Verify Public Trip Payment
+
+Verify Moyasar payment for a public trip booking with seat reservation.
+
+```bash
+POST /api/company-public-trips/bookings/{bookingId}/verify-payment
+```
+
+### Path Parameters
+
+<ParamField path="bookingId" type="string" required>
+  The public trip booking ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="moyasarPaymentId" type="string" required>
+  The payment ID returned by Moyasar
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if payment verification succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="bookingStatus" type="string">
+  Booking status after verification
+</ResponseField>
+
+<ResponseField name="paymentStatus" type="string">
+  Payment status
+</ResponseField>
+
+<ResponseField name="amountPaid" type="decimal">
+  Amount paid
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  Payment currency
+</ResponseField>
+
+### Public Trip Verification Flow
+
+1. **Payment Verification**: Validates payment with Moyasar
+2. **Seat Availability Check**: Ensures requested seats are still available
+3. **Seat Reservation**: Reserves seats on the trip
+4. **Booking Confirmation**: Updates booking to Pending status
+5. **Notification**: Alerts company of new booking
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/company-public-trips/bookings/pub_booking_xyz/verify-payment" \
+  -H "Authorization: Bearer USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "moyasarPaymentId": "pay_9z8y7x6w5v4u"
+  }'
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "تم التحقق من الدفع بنجاح. الحجز بانتظار موافقة الشركة",
+  "bookingStatus": "Pending",
+  "paymentStatus": "Completed",
+  "amountPaid": 300.00,
+  "currency": "SAR"
+}
+```
+
+### Seats No Longer Available
+
+```json
+{
+  "success": false,
+  "message": "عذراً، المقاعد لم تعد متاحة. سيتم استرداد المبلغ",
+  "bookingStatus": "Cancelled",
+  "paymentStatus": "Refunded"
+}
+```
+
+<Warning>
+**Important**: For public trips, seats are reserved AFTER successful payment verification. If seats become unavailable between payment and verification, the booking is cancelled and marked for refund.
+</Warning>
+
+---
+
+## Payment Verification States
+
+### Payment Order Not Found
+
+```json
+{
+  "success": false,
+  "message": "طلب الدفع غير موجود"
+}
+```
+
+Occurs when the payment order doesn't exist in the system.
+
+### Booking Not Found
+
+```json
+{
+  "success": false,
+  "message": "الحجز غير موجود"
+}
+```
+
+The referenced booking ID doesn't exist.
+
+### Booking Already Rejected/Cancelled
+
+```json
+{
+  "success": false,
+  "message": "لا يمكن التحقق من الدفع لحجز مرفوض"
+}
+```
+
+Cannot verify payment for bookings that were already rejected or cancelled.
+
+---
+
+## Integration Notes
+
+### Frontend Integration
+
+1. **Create Booking**: Get booking ID from booking creation endpoint
+2. **Initiate Moyasar Payment**: Use booking ID as order reference
+3. **Payment Callback**: Receive Moyasar payment ID
+4. **Verify Payment**: Call verification endpoint with payment ID
+5. **Handle Response**: Show success/failure message to user
+
+### Transaction Safety
+
+- All payment verifications use database transactions
+- Failed verifications trigger automatic rollback
+- Duplicate verification attempts are detected and prevented
+- Payment status transitions are atomic
+
+### Notification Flow
+
+| Event | Recipient | Notification Type |
+|-------|-----------|------------------|
+| Payment Success | Passenger | Payment confirmation |
+| Payment Success | Company | New booking alert |
+| Payment Failed | Passenger | Payment failed notice |
+| Seats Unavailable | Passenger | Refund notification |
+
+<Tip>
+Always handle the verification response client-side to provide immediate feedback. Don't rely solely on webhook notifications.
+</Tip>

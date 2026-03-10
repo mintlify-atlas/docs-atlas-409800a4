@@ -1,0 +1,502 @@
+---
+title: 'Admin Trip Management'
+description: 'Administrative endpoints for managing trips, cancellations, bookings, and replacements'
+---
+
+## Overview
+
+Admin trip management APIs allow administrators to oversee trip operations, manage bookings, handle cancellations, and assign replacement drivers. All endpoints require `AdminPolicy` authorization.
+
+## Get Cancelled Trips
+
+Retrieve all cancelled trips with optional filtering.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/trips/cancellations?page=1&pageSize=50" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="driverId" type="string" optional>
+  Filter by driver ID
+</ParamField>
+
+<ParamField query="from" type="string" optional>
+  Filter by origin city
+</ParamField>
+
+<ParamField query="to" type="string" optional>
+  Filter by destination city
+</ParamField>
+
+<ParamField query="cancelledFrom" type="string" optional>
+  Filter by cancellation date (from)
+</ParamField>
+
+<ParamField query="cancelledTo" type="string" optional>
+  Filter by cancellation date (to)
+</ParamField>
+
+<ParamField query="departureFrom" type="string" optional>
+  Filter by departure date (from)
+</ParamField>
+
+<ParamField query="departureTo" type="string" optional>
+  Filter by departure date (to)
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="pageSize" type="integer" default="50">
+  Number of results per page
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+<ResponseField name="trips" type="array">
+  Array of cancelled trip information
+  <expandable>
+    <ResponseField name="tripId" type="string">
+      Trip identifier
+    </ResponseField>
+    <ResponseField name="driverId" type="string">
+      Driver identifier
+    </ResponseField>
+    <ResponseField name="driverName" type="string">
+      Driver full name
+    </ResponseField>
+    <ResponseField name="driverProfileImageUrl" type="string">
+      Driver profile image URL
+    </ResponseField>
+    <ResponseField name="vehicleId" type="string">
+      Vehicle identifier
+    </ResponseField>
+    <ResponseField name="vehicleName" type="string">
+      Vehicle name/model
+    </ResponseField>
+    <ResponseField name="from" type="string">
+      Origin city
+    </ResponseField>
+    <ResponseField name="to" type="string">
+      Destination city
+    </ResponseField>
+    <ResponseField name="departureTime" type="string">
+      Departure timestamp
+    </ResponseField>
+    <ResponseField name="price" type="number">
+      Trip price
+    </ResponseField>
+    <ResponseField name="currency" type="string">
+      Currency code (e.g., SAR, USD)
+    </ResponseField>
+    <ResponseField name="totalSeats" type="integer">
+      Total seats in vehicle
+    </ResponseField>
+    <ResponseField name="confirmedBookingsCount" type="integer">
+      Number of confirmed bookings
+    </ResponseField>
+    <ResponseField name="cancellationReason" type="string">
+      Reason for cancellation
+    </ResponseField>
+    <ResponseField name="cancelledBy" type="string">
+      User who cancelled the trip
+    </ResponseField>
+    <ResponseField name="cancelledAt" type="string">
+      Cancellation timestamp
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="totalCount" type="integer">
+  Total number of cancelled trips
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="pageSize" type="integer">
+  Results per page
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total number of pages
+</ResponseField>
+
+---
+
+## Cancel Trip (Admin)
+
+Administrators can cancel any trip with a reason.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/trips/{tripId}/cancel" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Driver unavailable due to emergency"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Trip identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="reason" type="string" required>
+  Reason for cancellation
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message
+</ResponseField>
+
+<ResponseField name="tripId" type="string">
+  Cancelled trip identifier
+</ResponseField>
+
+---
+
+## Get Trip Booking Requests
+
+Retrieve all booking requests for a specific trip.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/trips/{tripId}/requests?status=pending" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Trip identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="status" type="string" optional>
+  Filter by booking status (pending, confirmed, cancelled)
+</ParamField>
+
+---
+
+## Accept Booking Request
+
+Accept a pending booking request for a trip.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/trips/{tripId}/requests/{bookingId}/accept" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "notes": "Approved by admin - special case"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Trip identifier
+</ParamField>
+
+<ParamField path="bookingId" type="string" required>
+  Booking identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the acceptance
+</ParamField>
+
+---
+
+## Reject Booking Request
+
+Reject a pending booking request for a trip.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/trips/{tripId}/requests/{bookingId}/reject" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Trip is full"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Trip identifier
+</ParamField>
+
+<ParamField path="bookingId" type="string" required>
+  Booking identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="reason" type="string" optional>
+  Reason for rejection
+</ParamField>
+
+---
+
+## Add Passenger to Trip
+
+Directly add a passenger to a trip without going through the booking request flow.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/trips/{tripId}/passengers" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "passengerId": "pass123",
+    "requestedSeatsCount": 2,
+    "paymentMethod": "Cash",
+    "notes": "VIP customer"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Trip identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="passengerId" type="string" required>
+  Passenger identifier
+</ParamField>
+
+<ParamField body="requestedSeatsCount" type="integer" required>
+  Number of seats to book
+</ParamField>
+
+<ParamField body="paymentMethod" type="string" default="Cash">
+  Payment method (Cash, Wallet, Moyasar, BankTransfer)
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the booking
+</ParamField>
+
+---
+
+## Remove Passenger from Trip
+
+Remove a passenger from a trip.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE "https://api.masareagle.com/api/admin/trips/{tripId}/passengers/{passengerId}?reason=Passenger%20requested%20cancellation" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Trip identifier
+</ParamField>
+
+<ParamField path="passengerId" type="string" required>
+  Passenger identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="reason" type="string" optional>
+  Reason for removal
+</ParamField>
+
+---
+
+## Replace Trip with New Driver
+
+Create a new trip with a different driver to replace a cancelled trip. All confirmed bookings are transferred.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/trips/{tripId}/replace-with-driver" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "newDriverId": "drv456",
+    "vehicleId": "veh789",
+    "transferAllBookings": true,
+    "notes": "Original driver unavailable"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Cancelled trip identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="newDriverId" type="string" required>
+  New driver identifier
+</ParamField>
+
+<ParamField body="vehicleId" type="string" required>
+  Vehicle identifier for the new trip
+</ParamField>
+
+<ParamField body="transferAllBookings" type="boolean" default="true">
+  Whether to transfer all confirmed bookings to the new trip
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the replacement
+</ParamField>
+
+---
+
+## Replace Trip with Existing Trip
+
+Transfer bookings from a cancelled trip to an existing scheduled trip.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/trips/{tripId}/replace-with-trip" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "replacementTripId": "trip999",
+    "transferAllBookings": true,
+    "notes": "Merged with another trip"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Cancelled trip identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="replacementTripId" type="string" required>
+  Existing trip identifier to receive the bookings
+</ParamField>
+
+<ParamField body="transferAllBookings" type="boolean" default="true">
+  Whether to transfer all confirmed bookings
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the replacement
+</ParamField>
+
+---
+
+## Get Replacement Options
+
+Get matching trips and available drivers for replacing a cancelled trip.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/trips/{tripId}/replacement-options" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Cancelled trip identifier
+</ParamField>
+
+### Response
+
+Returns matching trips (same route) and available drivers (no overlapping trips) that can replace the cancelled trip.
+
+---
+
+## Get Available Drivers
+
+Get available drivers who can replace a cancelled trip, with optional search.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/trips/{tripId}/available-drivers?searchNameOrPhone=Ahmed" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Cancelled trip identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="searchNameOrPhone" type="string" optional>
+  Search by driver name or phone number
+</ParamField>
+
+### Response
+
+Returns available drivers (active, approved, no overlapping trips) with vehicles that have enough seats.
+
+---
+
+## Delete Cancelled Trip
+
+Permanently delete a cancelled trip (logical deletion).
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE "https://api.masareagle.com/api/admin/trips/{tripId}" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="tripId" type="string" required>
+  Cancelled trip identifier
+</ParamField>
+
+<Note>
+Only cancelled trips can be deleted. This performs a logical deletion, not a hard delete from the database.
+</Note>

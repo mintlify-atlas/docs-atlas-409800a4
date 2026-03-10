@@ -1,0 +1,406 @@
+---
+title: 'Trip Management'
+description: 'Create, search, update, and manage trips in the Masar Eagle platform'
+icon: 'route'
+---
+
+## Overview
+
+The Trip Management system allows drivers to create and manage trips, passengers to search for available trips, and administrators to oversee all trip operations. The system supports multiple trip types including driver trips, company trips, and public company trips.
+
+## Creating a Trip
+
+Drivers can create trips by specifying route details, departure time, pricing, and available seats.
+
+### API Endpoint
+
+```http
+POST /api/trips
+```
+
+### Request Body
+
+```json
+{
+  "from": "Riyadh",
+  "fromLatitude": 24.7136,
+  "fromLongitude": 46.6753,
+  "fromAddress": "King Fahd Road",
+  "fromDescription": "Near Al Faisaliah Tower",
+  "to": "Jeddah",
+  "toLatitude": 21.5433,
+  "toLongitude": 39.1728,
+  "toAddress": "Corniche Road",
+  "toDescription": "Near Red Sea Mall",
+  "departureTimeUtc": "2026-03-15T08:00:00Z",
+  "arrivalTimeUtc": "2026-03-15T16:00:00Z",
+  "availableSeatCount": 3,
+  "price": 250.00,
+  "vehicleId": "v_123456",
+  "driverId": "d_789012",
+  "currency": "SAR",
+  "description": "Comfortable trip with AC",
+  "stops": [
+    {
+      "location": "Buraidah",
+      "latitude": 26.3260,
+      "longitude": 43.9750,
+      "address": "City Center",
+      "stopTimeUtc": "2026-03-15T11:00:00Z",
+      "stopOrder": 1,
+      "description": "15 minute rest stop"
+    }
+  ]
+}
+```
+
+### Implementation Details
+
+The trip creation process includes several validation steps:
+
+<Steps>
+  <Step title="Driver Verification">
+    The system verifies the driver exists, is active, and has an approved profile:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/CreateTrip/CreateTripHandler.cs
+    DriverBasicInfo? driverInfo = await usersApiService.GetDriverAsync(command.DriverId, cancellationToken);
+    if (driverInfo is null)
+        return CreateTripResponse.Error("لم يتم العثور على بيانات السائق");
+
+    if (!driverInfo.IsActive)
+        return CreateTripResponse.Error("لا يمكنك إنشاء رحلة لأن حسابك غير نشط.");
+
+    if (!string.Equals(driverInfo.VerificationStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        return CreateTripResponse.Error("لا يمكنك إنشاء رحلة قبل اكتمال اعتماد ملفك الشخصي.");
+    ```
+  </Step>
+  
+  <Step title="Vehicle Validation">
+    Validates the vehicle exists and checks seat capacity:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/CreateTrip/CreateTripHandler.cs
+    VehicleInfo? vehicle = await usersApiService.GetVehicleAsync(command.VehicleId, cancellationToken);
+    if (vehicle is null)
+        return CreateTripResponse.Error("لم يتم العثور على المركبة");
+
+    if (command.AvailableSeatCount > vehicleType.SeatCount)
+        return CreateTripResponse.Error($"عدد المقاعد المتاحة ({command.AvailableSeatCount}) لا يمكن أن يتجاوز سعة المركبة ({vehicleType.SeatCount})");
+    ```
+  </Step>
+  
+  <Step title="Time Validation">
+    Ensures departure time is in the future and arrival time is after departure:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/CreateTrip/CreateTripHandler.cs
+    if (command.DepartureTimeUtc <= DateTimeOffset.UtcNow)
+        return CreateTripResponse.Error("وقت الانطلاق يجب أن يكون في المستقبل");
+
+    if (command.ArrivalTimeUtc.HasValue && command.ArrivalTimeUtc <= command.DepartureTimeUtc)
+        return CreateTripResponse.Error("وقت الوصول يجب أن يكون بعد وقت الانطلاق");
+    ```
+  </Step>
+  
+  <Step title="Create and Notify">
+    Creates the trip and sends notifications to interested passengers:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/CreateTrip/CreateTripHandler.cs
+    await tripRepository.AddAsync(trip, cancellationToken);
+
+    var notification = new TripCreatedNotification(
+        trip.Id,
+        trip.From,
+        trip.To,
+        trip.DepartureTimeUtc,
+        trip.DriverId,
+        driverName);
+    await messageBus.PublishAsync(notification);
+
+    await similarTripNotificationService.SendSimilarTripNotificationsAsync(trip, cancellationToken);
+    ```
+  </Step>
+</Steps>
+
+### Response
+
+```json
+{
+  "success": true,
+  "message": "تم إنشاء الرحلة بنجاح",
+  "data": {
+    "id": "t_abc123",
+    "from": "Riyadh",
+    "to": "Jeddah",
+    "departureTimeUtc": "2026-03-15T08:00:00Z",
+    "availableSeatCount": 3,
+    "reservedSeatCount": 0,
+    "totalSeats": 4,
+    "price": 250.00,
+    "currency": "SAR",
+    "status": "Scheduled",
+    "stops": [...]
+  }
+}
+```
+
+## Searching for Trips
+
+The platform provides multiple search endpoints to help passengers find suitable trips.
+
+### Basic Search
+
+```http
+GET /api/trips/search?from=Riyadh&to=Jeddah&dateFrom=2026-03-15T00:00:00Z
+```
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/trips/search?from=Riyadh&to=Jeddah&dateFrom=2026-03-15T00:00:00Z"
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'https://api.masareagle.com/api/trips/search?from=Riyadh&to=Jeddah&dateFrom=2026-03-15T00:00:00Z'
+);
+const data = await response.json();
+```
+</CodeGroup>
+
+### Unified Search
+
+The unified search endpoint searches across all trip types (driver trips, company trips, and public trips):
+
+```http
+GET /api/trips/search/unified
+```
+
+**Query Parameters:**
+- `from` (optional) - Departure city/location
+- `to` (optional) - Destination city/location
+- `dateFrom` (optional) - Start date for search
+- `dateTo` (optional) - End date for search
+- `minPrice` (optional) - Minimum price filter
+- `maxPrice` (optional) - Maximum price filter
+- `requiredSeats` (optional) - Number of seats needed
+- `tripType` (optional) - Filter by type: `driver`, `company`, or `all`
+
+```csharp src/services/Trips/Trips.Api/Features/UnifiedSearch/UnifiedSearchEndpoint.cs
+public sealed record UnifiedSearchRequest(
+    [FromQuery] string? From,
+    [FromQuery] string? To,
+    [FromQuery] DateTimeOffset? DateFrom,
+    [FromQuery] DateTimeOffset? DateTo,
+    [FromQuery] decimal? MinPrice,
+    [FromQuery] decimal? MaxPrice,
+    [FromQuery] int? RequiredSeats,
+    [FromQuery] string? TripType)
+```
+
+### Search Response
+
+```json
+{
+  "trips": [
+    {
+      "tripId": "t_abc123",
+      "tripType": "Driver",
+      "from": "Riyadh",
+      "to": "Jeddah",
+      "departureTime": "2026-03-15T08:00:00Z",
+      "availableSeats": 3,
+      "price": 250.00,
+      "currency": "SAR",
+      "driverName": "Ahmed Ali",
+      "driverRating": 4.8,
+      "vehicleType": "Sedan",
+      "hasStops": true
+    }
+  ],
+  "totalCount": 15,
+  "searchCriteria": {
+    "from": "Riyadh",
+    "to": "Jeddah",
+    "dateFrom": "2026-03-15T00:00:00Z"
+  }
+}
+```
+
+## Updating Trips
+
+Drivers can update trip details before the trip starts.
+
+### API Endpoint
+
+```http
+PUT /api/trips/{tripId}
+```
+
+### Implementation
+
+```csharp src/services/Trips/Trips.Api/Features/UpdateTrip/UpdateTripEndpoint.cs
+app.MapPut("/api/trips/{tripId}", UpdateTripAsync)
+    .WithName("UpdateTrip").WithOpenApi();
+```
+
+<Note>
+Trips can only be updated if they are in "Scheduled" status and have not started yet.
+</Note>
+
+## Trip Lifecycle
+
+Trips progress through several statuses:
+
+<Steps>
+  <Step title="Scheduled">
+    Initial state after creation. Trip is open for bookings.
+  </Step>
+  
+  <Step title="InProgress">
+    Trip has started. Driver has initiated the journey.
+    
+    ```http
+    POST /api/trips/{tripId}/start
+    ```
+  </Step>
+  
+  <Step title="Completed">
+    Trip has ended successfully.
+    
+    ```http
+    POST /api/trips/{tripId}/complete
+    ```
+  </Step>
+  
+  <Step title="Cancelled">
+    Trip was cancelled by driver or admin.
+    
+    ```http
+    POST /api/trips/{tripId}/cancel
+    ```
+  </Step>
+</Steps>
+
+## Starting a Trip
+
+```csharp src/services/Trips/Trips.Api/Features/StartTrip/StartTripEndpoint.cs
+app.MapPost("/api/trips/{tripId}/start", async (
+    string tripId,
+    [FromServices] IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var command = new StartTripCommand { TripId = tripId };
+    var response = await mediator.Send(command, cancellationToken);
+    return response.Success ? Results.Ok(response) : Results.BadRequest(response);
+})
+```
+
+## Admin Trip Management
+
+Administrators have additional capabilities for managing trips:
+
+### View Trip Requests
+
+```http
+GET /api/admin/trips/{tripId}/requests
+```
+
+### Accept/Reject Bookings
+
+```http
+POST /api/admin/trips/{tripId}/requests/{bookingId}/accept
+POST /api/admin/trips/{tripId}/requests/{bookingId}/reject
+```
+
+### Add/Remove Passengers
+
+```http
+POST /api/admin/trips/{tripId}/passengers
+DELETE /api/admin/trips/{tripId}/passengers/{passengerId}
+```
+
+### Cancel Trips
+
+```http
+POST /api/admin/trips/{tripId}/cancel
+```
+
+```json
+{
+  "reason": "Driver unavailable due to emergency"
+}
+```
+
+### Replace Cancelled Trips
+
+Admins can replace a cancelled trip with a new driver or existing trip:
+
+```http
+POST /api/admin/trips/{tripId}/replace-with-driver
+POST /api/admin/trips/{tripId}/replace-with-trip
+```
+
+<Tip>
+When replacing a trip, all confirmed bookings can be automatically transferred to the replacement trip.
+</Tip>
+
+## Trip Statistics
+
+Retrieve trip statistics for analytics:
+
+```http
+GET /api/admin/statistics/trips-movement?period=today
+```
+
+**Available periods:** `today`, `week`, `month`
+
+## Error Handling
+
+Common error responses:
+
+<AccordionGroup>
+  <Accordion title="Driver Not Approved">
+    ```json
+    {
+      "success": false,
+      "message": "لا يمكنك إنشاء رحلة قبل اكتمال اعتماد ملفك الشخصي."
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Insufficient Seats">
+    ```json
+    {
+      "success": false,
+      "message": "عدد المقاعد المتاحة (5) لا يمكن أن يتجاوز سعة المركبة (4)"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Departure Time">
+    ```json
+    {
+      "success": false,
+      "message": "وقت الانطلاق يجب أن يكون في المستقبل"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Validate Inputs" icon="check">
+    Always validate departure times, seat counts, and route information before creating trips.
+  </Card>
+  
+  <Card title="Use Stops Wisely" icon="location-dot">
+    Add intermediate stops to increase booking opportunities and provide flexibility.
+  </Card>
+  
+  <Card title="Set Realistic Prices" icon="dollar-sign">
+    Price trips competitively based on distance, duration, and market rates.
+  </Card>
+  
+  <Card title="Monitor Bookings" icon="bell">
+    Keep track of booking requests and respond promptly to passenger inquiries.
+  </Card>
+</CardGroup>

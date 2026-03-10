@@ -1,0 +1,539 @@
+---
+title: Trips Service
+description: Core service managing trips, bookings, payments, and wallet operations
+---
+
+## Overview
+
+The Trips service is the heart of the Masar Eagle platform, handling all trip-related operations including on-demand bookings, company bookings, public trips, payments, wallet management, and reviews. It integrates with **Moyasar** for payment processing and uses **Hangfire** for background jobs.
+
+<Info>
+  Trips service location: `src/services/Trips/Trips.Api/Program.cs`
+</Info>
+
+## Core Responsibilities
+
+- **Trip Management**: Create, track, start, complete, and cancel trips
+- **Booking System**: Handle passenger bookings, driver assignments, and booking lifecycle
+- **Payment Processing**: Integrate with Moyasar for credit card and Apple Pay payments
+- **Wallet Operations**: Manage driver, passenger, and company wallet balances and transactions
+- **Reviews & Ratings**: Collect and manage driver, passenger, and company reviews
+- **Public Trips**: Shared ride functionality for company-operated routes
+- **Company Bookings**: Corporate trip management for business clients
+- **Bank Transfers**: Handle withdrawal requests and bank account management
+- **Statistics & Reports**: Generate financial summaries and trip statistics
+- **Background Jobs**: Trip reminders, auto-cancellation, and notifications
+
+## Technology Stack
+
+- **ASP.NET Core Minimal APIs**: High-performance endpoint definitions
+- **MediatR**: CQRS pattern for commands and queries
+- **Entity Framework Core**: Database access
+- **PostgreSQL**: Primary database
+- **Hangfire**: Background job scheduling and processing
+- **Wolverine**: Message bus for inter-service communication
+- **RabbitMQ**: Event distribution
+- **Moyasar SDK**: Payment gateway integration
+- **FluentValidation**: Request validation
+- **Response Compression**: Brotli and Gzip
+
+## Program.cs Configuration
+
+```csharp Program.cs
+using Trips.Api.Infrastructure.Extensions;
+using Trips.Api.Infrastructure.Services;
+using Trips.Api.Infrastructure.BackgroundServices;
+using ServiceDefaults;
+using Wolverine.RabbitMQ;
+using Hangfire;
+using Hangfire.MemoryStorage;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+builder.AddServiceDefaults();
+builder.Services.AddHealthChecks();
+
+// Enable response compression
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat([
+        "application/json",
+        "application/geo+json",
+        "text/plain"
+    ]);
+});
+
+// Swagger configuration
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Masar Eagle Trips API",
+        Version = "v1",
+        Description = "API for managing trips, seat bookings, and passenger reservations"
+    });
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
+    c.CustomSchemaIds(type => type.FullName?.Replace('.', '_') ?? type.Name);
+});
+
+builder.Services.AddMediatR(cfg => 
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
+builder.Services.AddValidatorsFromAssemblyContaining(typeof(Program));
+
+builder.AddDatabase();
+
+// Core services
+builder.Services.AddScoped<IUsersApiService, UsersService>();
+builder.Services.AddScoped<IWalletOperationService, WalletOperationService>();
+builder.Services.AddScoped<IMoyasarVerificationService, MoyasarVerificationService>();
+builder.Services.AddScoped<ICompanyBookingPaymentService, CompanyBookingPaymentService>();
+builder.Services.AddScoped<IBookingTransferService, BookingTransferService>();
+builder.Services.AddScoped<ITripCancellationService, TripCancellationService>();
+builder.Services.AddScoped<IBookingCancellationService, BookingCancellationService>();
+builder.Services.AddScoped<IBookingAcceptanceService, BookingAcceptanceService>();
+
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddCors(options => 
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+
+builder.Services.AddAppAuthentication(builder.Configuration);
+
+// Trip reminder and auto-cancel configuration
+builder.Services.Configure<TripReminderOptions>(
+    builder.Configuration.GetSection("TripReminder"));
+builder.Services.Configure<AutoCancelOverdueTripsOptions>(
+    builder.Configuration.GetSection("AutoCancelOverdueTrips"));
+
+// Moyasar payment integration
+builder.AddMoyasarPaymentServices();
+
+// Hangfire for background jobs
+builder.Services.AddHangfire(config => config
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseMemoryStorage());
+
+builder.Services.AddHangfireServer(options =>
+{
+    options.Queues = ["default", "notifications"];
+    options.WorkerCount = Environment.ProcessorCount * 5;
+});
+
+builder.Services.AddHostedService<HangfireStartupService>();
+builder.Services.AddScoped<ITripReminderRepository, TripReminderRepository>();
+builder.Services.AddScoped<SimilarTripNotificationService>();
+
+// Wolverine messaging
+await builder.UseWolverineWithRabbitMqAsync(opts =>
+{
+    opts.PublishMessage<UploadFileCommand>()
+        .ToRabbitQueue("users-api-queue");
+    opts.PublishMessage<UpdateDriverRatingCommand>()
+        .ToRabbitQueue("users-api-queue");
+    opts.PublishMessage<UpdatePassengerRatingCommand>()
+        .ToRabbitQueue("users-api-queue");
+    
+    opts.Publish()
+        .MessagesFromAssemblyContaining<DriverCreatedNotification>()
+        .ToRabbitExchange(Components.RabbitMQConfig.ExchangeName);
+    
+    opts.ListenToRabbitQueue("trips-api-queue",
+        cfg => cfg.BindExchange(Components.RabbitMQConfig.ExchangeName));
+    
+    opts.ApplicationAssembly = typeof(Program).Assembly;
+});
+
+WebApplication app = builder.Build();
+
+app.UseGlobalExceptionHandler();
+app.UseResponseCompression();
+app.UseCors();
+app.UseAppAuthentication();
+
+// Swagger UI
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Masar Eagle Trips API v1");
+    c.RoutePrefix = "swagger";
+});
+
+// Hangfire Dashboard
+var hangfireOptions = builder.Configuration
+    .GetSection("Hangfire").Get<HangfireOptions>() ?? new();
+if (hangfireOptions.DashboardEnabled)
+{
+    app.UseHangfireDashboard(hangfireOptions.DashboardPath, new DashboardOptions
+    {
+        Authorization = [new HangfireAuthorizationFilter()],
+        DashboardTitle = "Trips API - Hangfire Dashboard"
+    });
+}
+
+app.MapAllEndpoints();
+await app.RunAsync();
+```
+
+## API Endpoints Overview
+
+### Trip Endpoints
+
+<AccordionGroup>
+  <Accordion title="Driver Trips">
+    - `GET /api/drivers/{driverId}/trips` - List driver's trips
+    - `GET /api/drivers/{driverId}/trips/{tripId}` - Get trip details
+    - `POST /api/drivers/{driverId}/trips` - Create new trip
+    - `PUT /api/drivers/{driverId}/trips/{tripId}/start` - Start trip
+    - `PUT /api/drivers/{driverId}/trips/{tripId}/complete` - Complete trip
+    - `PUT /api/drivers/{driverId}/trips/{tripId}/cancel` - Cancel trip
+  </Accordion>
+
+  <Accordion title="Passenger Trips">
+    - `GET /api/passengers/{passengerId}/trips` - List passenger's trips
+    - `GET /api/passengers/{passengerId}/trips/{tripId}` - Get trip details
+  </Accordion>
+
+  <Accordion title="Company Trips">
+    - `GET /api/companies/{companyId}/trips` - List company trips
+    - `GET /api/companies/{companyId}/trips/{tripId}` - Trip details
+    - `GET /api/companies/{companyId}/trips/{tripId}/ledger` - Financial ledger
+    - `GET /api/trips/companies/{companyId}/trips` - Alternative endpoint
+  </Accordion>
+
+  <Accordion title="Admin Trip Management">
+    - `GET /api/admin/trips` - List all trips
+    - `GET /api/admin/trips/{tripId}` - Get trip details
+    - `GET /api/admin/trips/{tripId}/ledger` - View trip ledger
+    - `GET /api/admin/trips/{tripId}/requests` - View booking requests
+    - `POST /api/admin/trips/{tripId}/requests/{requestId}/accept` - Accept request
+    - `POST /api/admin/trips/{tripId}/requests/{requestId}/reject` - Reject request
+    - `POST /api/admin/trips/{tripId}/cancel` - Cancel trip
+    - `GET /api/admin/trips/cancellations` - List cancellations
+  </Accordion>
+
+  <Accordion title="Trip Replacement">
+    - `GET /api/admin/trips/{tripId}/replacement-options` - Get replacement options
+    - `GET /api/admin/trips/{tripId}/available-drivers` - List available drivers
+    - `POST /api/admin/trips/{tripId}/replace-with-trip` - Replace with another trip
+    - `POST /api/admin/trips/{tripId}/replace-with-driver` - Assign different driver
+  </Accordion>
+
+  <Accordion title="Search & Discovery">
+    - `GET /api/trips/search/unified` - Unified search for trips
+    - `GET /api/company-trips/search` - Search company trips
+  </Accordion>
+</AccordionGroup>
+
+### Booking Endpoints
+
+<AccordionGroup>
+  <Accordion title="Passenger Bookings">
+    - `POST /api/bookings` - Create booking
+    - `GET /api/bookings/{bookingId}` - Get booking details
+    - `POST /api/bookings/{bookingId}/cancel` - Cancel booking
+    - `POST /api/bookings/{bookingId}/verify-payment` - Verify Moyasar payment
+    - `GET /api/drivers/{driverId}/bookings` - List driver bookings
+  </Accordion>
+
+  <Accordion title="Company Bookings">
+    - `POST /api/company-bookings` - Create company booking
+    - `GET /api/companies/{companyId}/bookings` - List company bookings
+    - `POST /api/companies/{companyId}/bookings/{bookingId}/cancel` - Cancel
+    - `POST /api/company-bookings/{bookingId}/unassign-driver` - Unassign driver
+    - `POST /api/company-bookings/{bookingId}/unassign-vehicle` - Unassign vehicle
+    - `POST /api/drivers/{driverId}/company-bookings/{bookingId}/start` - Start
+    - `POST /api/drivers/{driverId}/company-bookings/{bookingId}/complete` - Complete
+  </Accordion>
+
+  <Accordion title="Public Trip Bookings">
+    - `POST /api/public-trips/{tripId}/book` - Book seat on public trip
+    - `GET /api/public-trips/{tripId}` - Get public trip details
+    - `GET /api/passengers/{passengerId}/public-trip-bookings` - List bookings
+    - `POST /api/passengers/{passengerId}/public-trip-bookings/{bookingId}/cancel` - Cancel
+    - `POST /api/company-public-trips/bookings/{bookingId}/verify-payment` - Verify payment
+  </Accordion>
+</AccordionGroup>
+
+### Wallet Endpoints
+
+<AccordionGroup>
+  <Accordion title="Driver Wallets">
+    - `GET /api/drivers/{driverId}/wallet` - Get wallet balance
+    - `GET /api/drivers/{driverId}/wallet/exists` - Check if wallet exists
+    - `GET /api/drivers/{driverId}/wallet/transactions` - Transaction history
+    - `GET /api/drivers/{driverId}/wallets` - Multi-currency wallets
+    - `POST /api/admin/drivers/{driverId}/wallet/deposit` - Admin deposit
+    - `POST /api/admin/drivers/{driverId}/wallet/withdraw` - Admin withdrawal
+    - `GET /api/admin/wallets/drivers` - List all driver wallets
+  </Accordion>
+
+  <Accordion title="Passenger Wallets">
+    - `GET /api/passengers/{passengerId}/wallet` - Get wallet balance
+    - `GET /api/passengers/{passengerId}/wallet/exists` - Check if wallet exists
+    - `GET /api/passengers/{passengerId}/wallet/transactions` - Transaction history
+    - `GET /api/passengers/{passengerId}/wallets` - Multi-currency wallets
+    - `POST /api/admin/passengers/{passengerId}/wallet/deposit` - Admin deposit
+    - `GET /api/admin/wallets/passengers` - List all passenger wallets
+  </Accordion>
+
+  <Accordion title="Company Wallets">
+    - `GET /api/trips/companies/{companyId}/wallets` - List company wallets
+    - `GET /api/trips/companies/{companyId}/wallet/{currency}` - Get wallet by currency
+    - `GET /api/trips/companies/{companyId}/wallet/{currency}/transactions` - Transactions
+    - `POST /api/admin/companies/{companyId}/wallet/deposit` - Admin deposit
+    - `POST /api/admin/companies/{companyId}/wallet/withdraw` - Admin withdrawal
+    - `GET /api/admin/wallets/companies` - List all company wallets
+  </Accordion>
+
+  <Accordion title="Wallet Top-Up">
+    - `POST /api/wallet/top-up/bank-transfer` - Request top-up via bank transfer
+    - `POST /api/wallets/topup/verify` - Verify Moyasar payment for top-up
+    - `POST /api/admin/wallet-top-up/{transferId}/approve` - Approve transfer
+    - `POST /api/admin/wallet-top-up/{transferId}/reject` - Reject transfer
+  </Accordion>
+</AccordionGroup>
+
+### Payment & Bank Transfer Endpoints
+
+<AccordionGroup>
+  <Accordion title="Bank Accounts">
+    - `GET /api/bank-accounts` - Public list of bank accounts for deposits
+    - `GET /api/admin/bank-accounts` - Admin view of bank accounts
+    - `POST /api/admin/bank-accounts` - Add bank account
+    - `PUT /api/admin/bank-accounts/{id}` - Update bank account
+    - `DELETE /api/admin/bank-accounts/{id}` - Remove bank account
+    - `GET /api/companies/{companyId}/bank-accounts` - Company bank accounts
+  </Accordion>
+
+  <Accordion title="Bank Transfers">
+    - `GET /api/admin/bank-transfers/pending` - Pending transfer requests
+    - `POST /api/admin/bank-transfers/{transferId}/approve` - Approve transfer
+    - `POST /api/admin/bank-transfers/{transferId}/reject` - Reject transfer
+    - `POST /api/admin/bank-transfers/{transferId}/convert-to-cash` - Convert to cash
+  </Accordion>
+</AccordionGroup>
+
+### Review Endpoints
+
+<AccordionGroup>
+  <Accordion title="Driver Reviews">
+    - `POST /api/trips/{tripId}/driver-review` - Submit driver review
+    - `GET /api/drivers/{driverId}/reviews` - List driver reviews
+    - `GET /api/drivers/reviews/{reviewId}` - Get review details
+    - `GET /api/admin/driver-reviews` - Admin view of driver reviews
+  </Accordion>
+
+  <Accordion title="Passenger Reviews">
+    - `POST /api/trips/{tripId}/passenger-review` - Submit passenger review
+    - `GET /api/passengers/{passengerId}/reviews` - List passenger reviews
+    - `GET /api/passengers/reviews/{reviewId}` - Get review details
+    - `GET /api/admin/passenger-reviews` - Admin view of passenger reviews
+  </Accordion>
+
+  <Accordion title="Company Reviews">
+    - `POST /api/trips/{tripId}/company-review` - Submit company review
+    - `GET /api/companies/{companyId}/reviews` - List company reviews
+    - `GET /api/companies/reviews/{reviewId}` - Get review details
+  </Accordion>
+</AccordionGroup>
+
+### Statistics & Reports
+
+<AccordionGroup>
+  <Accordion title="Dashboard">
+    - `GET /api/admin/dashboard/financial-summary` - Financial overview
+    - `GET /api/companies/{companyId}/dashboard` - Company dashboard
+  </Accordion>
+
+  <Accordion title="Statistics">
+    - `GET /api/admin/statistics/trips` - Trip statistics
+    - `GET /api/admin/statistics/revenue` - Revenue statistics
+    - `GET /api/admin/statistics/users` - User statistics
+  </Accordion>
+
+  <Accordion title="Reports">
+    - `GET /api/admin/reports/trips` - Trip reports
+    - `GET /api/admin/reports/financial` - Financial reports
+    - `GET /api/companies/{companyId}/reports` - Company-specific reports
+  </Accordion>
+
+  <Accordion title="Usage Tracking">
+    - `GET /api/vehicle-usage` - Vehicle usage statistics
+    - `GET /api/user-usage` - User activity tracking
+  </Accordion>
+</AccordionGroup>
+
+## Payment Integration (Moyasar)
+
+The service integrates with Moyasar payment gateway for three user types:
+
+### Configuration
+
+```json appsettings.json
+"MoyasarPassenger": {
+  "SecretKey": "sk_test_oGvN71Tgsw429FYKTvPBRWCrRxewA5ksBUZfrF3D",
+  "PublishableKey": "pk_test_U98aBTpbKq872iJnEwQZz74mvSH1PzJvkUCPkEwb",
+  "ApiUrl": "https://api.moyasar.com/v1"
+},
+"MoyasarDriver": {
+  "SecretKey": "sk_test_rwiVVafby18haxgWBP5aHJuVqRdWY6spnbRsX8tr",
+  "PublishableKey": "pk_test_U98aBTpbKq872iJnEwQZz74mvSH1PzJvkUCPkEwb",
+  "ApiUrl": "https://api.moyasar.com/v1"
+},
+"MoyasarCompany": {
+  "SecretKey": "sk_test_XuXgENcyJp9aD66g2nWoCTTtssTvHtx5C3Z17P5f",
+  "PublishableKey": "pk_test_gqnvha1K1gmXh2iAbrQbu8avpfELJydC75GfR8pn",
+  "ApiUrl": "https://api.moyasar.com/v1"
+}
+```
+
+### Payment Flow
+
+1. **Create Booking**: Client creates a booking
+2. **Get Payment ID**: Service returns Moyasar payment ID
+3. **Client Completes Payment**: Mobile app handles Moyasar payment UI
+4. **Verify Payment**: Client calls verify endpoint
+5. **Confirm Booking**: Service confirms booking and updates wallet
+
+### Payment Verification
+
+```csharp
+var verificationResult = await moyasarVerificationService
+    .VerifyPaymentAsync(bookingId, paymentId, userType);
+
+if (verificationResult.Status == PaymentStatus.Paid)
+{
+    await bookingAcceptanceService.AcceptBookingAsync(bookingId);
+    await walletOperationService.CreditWalletAsync(
+        driverId, 
+        amount, 
+        currency,
+        $"Payment for booking {bookingId}"
+    );
+}
+```
+
+## Background Jobs (Hangfire)
+
+The service runs several background jobs:
+
+### Trip Reminders
+
+Sends notifications to drivers and passengers before trip start time:
+
+```json appsettings.json
+"TripReminder": {
+  "ReminderTimeWindowMinutes": 60,
+  "CronExpression": "*/5 * * * *",
+  "BatchSize": 50,
+  "EnableReminders": true
+}
+```
+
+Runs every 5 minutes and sends reminders for trips starting within the next hour.
+
+### Auto-Cancel Overdue Trips
+
+Automatically cancels trips that haven't started after their scheduled time:
+
+```json appsettings.json
+"AutoCancelOverdueTrips": {
+  "EnableAutoCancel": true,
+  "GracePeriodHours": 5,
+  "CronExpression": "*/10 * * * *",
+  "BatchSize": 50
+}
+```
+
+Runs every 10 minutes and cancels trips that are more than 5 hours overdue.
+
+### Hangfire Dashboard
+
+Access the Hangfire dashboard at:
+
+```
+GET /hangfire
+```
+
+The dashboard shows:
+- Scheduled jobs
+- Processing jobs
+- Failed jobs
+- Job history and statistics
+
+## Wallet Operations
+
+The service implements a comprehensive wallet system:
+
+### Wallet Types
+
+- **Driver Wallets**: Earnings from completed trips
+- **Passenger Wallets**: Pre-paid balance for bookings
+- **Company Wallets**: Corporate account balance
+
+### Transaction Types
+
+- `Credit`: Add funds
+- `Debit`: Remove funds
+- `TripEarning`: Payment from completed trip
+- `BookingPayment`: Payment for booking
+- `Commission`: Platform commission
+- `Refund`: Cancelled booking refund
+- `Withdrawal`: Bank transfer withdrawal
+- `Deposit`: Top-up deposit
+
+### Multi-Currency Support
+
+Each user can have multiple wallets in different currencies (SAR, USD, etc.).
+
+## Message Bus Events
+
+**Published Events:**
+- `TripCreated`
+- `TripStarted`
+- `TripCompleted`
+- `TripCancelled`
+- `BookingCreated`
+- `BookingAccepted`
+- `BookingRejected`
+- `PaymentReceived`
+- Notification events (sent to Notifications service)
+
+**Consumed Events:**
+- `DriverCreated` - Initialize driver data
+- `DriverUpdated` - Sync driver information
+- `CompanyCreated` - Initialize company data
+- `VehicleCreated` - Register vehicle for trips
+
+## Swagger Documentation
+
+The service includes comprehensive Swagger documentation:
+
+```
+GET /swagger
+```
+
+The Swagger UI includes all endpoints with detailed request/response schemas and examples.
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Users Service" icon="users" href="/services/users">
+    Provides user data and validation
+  </Card>
+  <Card title="Notifications Service" icon="bell" href="/services/notifications">
+    Sends trip and booking notifications
+  </Card>
+  <Card title="Gateway" icon="network-wired" href="/services/gateway">
+    Routes trip-related requests
+  </Card>
+  <Card title="Identity Service" icon="key" href="/services/identity">
+    Authenticates API requests
+  </Card>
+</CardGroup>

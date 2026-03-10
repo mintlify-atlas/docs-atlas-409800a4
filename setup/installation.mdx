@@ -1,0 +1,493 @@
+---
+title: Installation Guide
+description: Step-by-step instructions to install Masar Eagle
+icon: download
+---
+
+## Overview
+
+This guide walks you through the complete installation process for Masar Eagle. Choose between local development or production deployment based on your needs.
+
+<Note>
+  Before proceeding, ensure you have completed the [Prerequisites](/setup/prerequisites) setup.
+</Note>
+
+## Quick Start
+
+Get Masar Eagle running in under 5 minutes:
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/your-org/masar-eagle.git
+    cd masar-eagle
+    ```
+  </Step>
+  
+  <Step title="Run with .NET Aspire">
+    ```bash
+    cd src/aspire/AppHost
+    dotnet run
+    ```
+    
+    This will:
+    - Start the Aspire orchestration dashboard
+    - Launch all microservices
+    - Provision PostgreSQL, RabbitMQ, and monitoring tools
+    - Open the dashboard at `http://localhost:8080`
+  </Step>
+  
+  <Step title="Access Services">
+    - **Aspire Dashboard**: http://localhost:8080
+    - **API Gateway**: http://localhost:8080/api
+    - **pgAdmin**: http://localhost:5050
+    - **RabbitMQ Management**: http://localhost:15672
+    - **Grafana**: http://localhost:3000
+    - **Jaeger**: http://localhost:16686
+  </Step>
+</Steps>
+
+## Installation Methods
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="laptop-code" href="#local-development">
+    Run with .NET Aspire for development
+  </Card>
+  
+  <Card title="Docker Deployment" icon="docker" href="/setup/docker-deployment">
+    Deploy using Docker Compose
+  </Card>
+  
+  <Card title="Aspire Deployment" icon="cloud" href="/setup/aspire-deployment">
+    Deploy with .NET Aspire publish
+  </Card>
+  
+  <Card title="Kubernetes" icon="dharmachakra" href="#kubernetes-deployment">
+    Deploy to Kubernetes cluster
+  </Card>
+</CardGroup>
+
+## Local Development
+
+### Step 1: Clone and Navigate
+
+```bash
+git clone https://github.com/your-org/masar-eagle.git
+cd masar-eagle
+```
+
+### Step 2: Restore Dependencies
+
+```bash
+# Restore all NuGet packages
+dotnet restore
+
+# Verify restoration
+dotnet build --no-restore
+```
+
+### Step 3: Configure AppHost
+
+The AppHost is pre-configured but can be customized:
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Aspire.Hosting.Dcp": "Warning"
+    }
+  },
+  "Parameters": {
+    "username": "guest",
+    "password": "guest"
+  }
+}
+```
+
+```bash Environment Variables
+# Optional: Override default settings
+export ASPNETCORE_ENVIRONMENT=Development
+export DOTNET_ENVIRONMENT=Development
+```
+</CodeGroup>
+
+### Step 4: Run the Application
+
+<Tabs>
+  <Tab title="Using .NET CLI">
+    ```bash
+    cd src/aspire/AppHost
+    dotnet run
+    ```
+  </Tab>
+  
+  <Tab title="Using Visual Studio">
+    1. Open `MasarEagle.sln` in Visual Studio 2022
+    2. Set `AppHost` as the startup project
+    3. Press F5 or click Start
+  </Tab>
+  
+  <Tab title="Using Rider">
+    1. Open the solution in JetBrains Rider
+    2. Select the `AppHost` run configuration
+    3. Click the Run button
+  </Tab>
+  
+  <Tab title="Using VS Code">
+    ```bash
+    # Install C# Dev Kit extension first
+    cd src/aspire/AppHost
+    dotnet run
+    ```
+  </Tab>
+</Tabs>
+
+### Step 5: Verify Installation
+
+<Steps>
+  <Step title="Check Aspire Dashboard">
+    Open http://localhost:8080 to see the Aspire orchestration dashboard.
+    
+    You should see:
+    - All services in "Running" state
+    - PostgreSQL and RabbitMQ healthy
+    - No error logs
+  </Step>
+  
+  <Step title="Test API Gateway">
+    ```bash
+    # Health check
+    curl http://localhost:8080/health
+    
+    # Expected response
+    {"status":"Healthy"}
+    ```
+  </Step>
+  
+  <Step title="Check Database Connectivity">
+    ```bash
+    # Access pgAdmin at http://localhost:5050
+    # Default credentials are set by Aspire
+    
+    # You should see 4 databases:
+    # - user
+    # - trip
+    # - notifications
+    # - auth
+    ```
+  </Step>
+  
+  <Step title="Verify Message Queue">
+    ```bash
+    # Access RabbitMQ Management UI
+    # http://localhost:15672
+    # Username: guest
+    # Password: guest
+    
+    # Check that exchanges and queues are created
+    ```
+  </Step>
+</Steps>
+
+## Service Configuration
+
+### Architecture Overview
+
+Masar Eagle consists of the following services:
+
+<CardGroup cols={2}>
+  <Card title="Gateway" icon="door-open">
+    YARP-based API Gateway
+    - Routes requests to services
+    - Service discovery
+    - Load balancing
+  </Card>
+  
+  <Card title="Identity" icon="key">
+    Authentication Service
+    - OpenIddict integration
+    - JWT token generation
+    - User authentication
+  </Card>
+  
+  <Card title="Users" icon="users">
+    User Management
+    - Driver profiles
+    - Passenger profiles
+    - Company management
+  </Card>
+  
+  <Card title="Trips" icon="route">
+    Trip Management
+    - Booking system
+    - Wallet management
+    - Trip scheduling
+  </Card>
+  
+  <Card title="Notifications" icon="bell">
+    Notification Service
+    - Firebase Cloud Messaging
+    - Push notifications
+    - Device token management
+  </Card>
+</CardGroup>
+
+### Service Dependencies
+
+The AppHost configures service dependencies and startup order:
+
+```csharp AppHost.cs (excerpt)
+// PostgreSQL with 4 databases
+var postgres = builder.AddPostgres("postgres")
+    .WithDataVolume("masar-postgres-data")
+    .WithPgAdmin();
+
+var usersDb = postgres.AddDatabase("user");
+var tripsDb = postgres.AddDatabase("trip");
+var notificationsDb = postgres.AddDatabase("notifications");
+var authDb = postgres.AddDatabase("auth");
+
+// RabbitMQ with management plugin
+var rabbitmq = builder.AddRabbitMQ("rabbitmq")
+    .WithDataVolume("rabbitmq-data")
+    .WithManagementPlugin();
+
+// Services with dependencies
+builder.AddProject<User>("user")
+    .WithReference(usersDb)
+    .WithReference(rabbitmq)
+    .WaitFor(usersDb)
+    .WaitFor(rabbitmq);
+```
+
+<Note>
+  All services automatically wait for their dependencies to be healthy before starting.
+</Note>
+
+## Database Migrations
+
+### Automatic Migrations
+
+Masar Eagle uses FluentMigrator for database migrations. Migrations run automatically on service startup:
+
+```bash
+# Migrations are applied when each service starts
+# Check logs for migration status:
+
+[Information] Running migrations for database: user
+[Information] Migration 20240101000000_InitialSchema completed
+[Information] Database is up to date
+```
+
+### Manual Migration Control
+
+<Tabs>
+  <Tab title="Apply Migrations">
+    ```bash
+    # Run migrations for a specific service
+    cd src/services/Users/Users.Api
+    dotnet run -- --migrate
+    ```
+  </Tab>
+  
+  <Tab title="Rollback Migrations">
+    ```bash
+    # Rollback to a specific version
+    dotnet run -- --migrate --version=20240101000000
+    ```
+  </Tab>
+  
+  <Tab title="View Migration Status">
+    ```bash
+    # List applied migrations
+    dotnet run -- --migrate --list
+    ```
+  </Tab>
+</Tabs>
+
+## Monitoring Setup
+
+### OpenTelemetry Configuration
+
+All services are configured with OpenTelemetry for observability:
+
+```csharp
+// Each service sends telemetry to the collector
+services.WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcollector:4317")
+    .WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+    .WithEnvironment("OTEL_SERVICE_NAME", serviceName);
+```
+
+### Access Monitoring Tools
+
+<AccordionGroup>
+  <Accordion title="Prometheus - Metrics">
+    **URL**: http://localhost:9090
+    
+    ```promql
+    # Example queries
+    rate(http_requests_total[5m])
+    up{job="user"}
+    ```
+  </Accordion>
+  
+  <Accordion title="Grafana - Dashboards">
+    **URL**: http://localhost:3000
+    
+    Pre-configured dashboards for:
+    - Service metrics
+    - Database performance
+    - RabbitMQ statistics
+    - Business metrics
+  </Accordion>
+  
+  <Accordion title="Jaeger - Distributed Tracing">
+    **URL**: http://localhost:16686
+    
+    View request traces across all services:
+    - Request flow visualization
+    - Performance bottlenecks
+    - Error tracking
+  </Accordion>
+  
+  <Accordion title="Loki - Log Aggregation">
+    **URL**: http://localhost:3100
+    
+    Access via Grafana Explore:
+    - Centralized logs from all services
+    - Log filtering and searching
+    - Log correlation with traces
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Port Conflicts">
+    If you encounter port conflicts:
+    
+    ```bash
+    # Check which process is using a port
+    lsof -i :8080  # Linux/macOS
+    netstat -ano | findstr :8080  # Windows
+    
+    # Modify AppHost.cs to use different ports
+    builder.AddProject<Gateway>("gateway")
+        .WithHttpEndpoint(port: 8081);  // Change port
+    ```
+  </Accordion>
+  
+  <Accordion title="Database Connection Errors">
+    If services can't connect to PostgreSQL:
+    
+    ```bash
+    # Check PostgreSQL container status
+    docker ps | grep postgres
+    
+    # View PostgreSQL logs
+    docker logs <container-id>
+    
+    # Restart PostgreSQL
+    docker restart <container-id>
+    ```
+  </Accordion>
+  
+  <Accordion title="Service Not Starting">
+    Check the Aspire dashboard logs:
+    
+    ```bash
+    # Services log startup issues to console
+    # Common issues:
+    # - Missing environment variables
+    # - Database migration failures
+    # - Port conflicts
+    ```
+  </Accordion>
+  
+  <Accordion title="RabbitMQ Connection Issues">
+    ```bash
+    # Verify RabbitMQ is running
+    docker ps | grep rabbitmq
+    
+    # Check RabbitMQ logs
+    docker logs <rabbitmq-container-id>
+    
+    # Verify credentials in appsettings.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  If you encounter persistent issues, try cleaning and rebuilding:
+  
+  ```bash
+  # Clean solution
+  dotnet clean
+  
+  # Remove containers and volumes
+  docker compose down -v
+  
+  # Rebuild and run
+  dotnet build
+  cd src/aspire/AppHost
+  dotnet run
+  ```
+</Warning>
+
+## Environment-Specific Setup
+
+### Development Environment
+
+```bash
+# Use mock services for external dependencies
+export ASPNETCORE_ENVIRONMENT=Development
+
+# SMS Provider: Mock (no real SMS sent)
+# Email Provider: Resend (test mode)
+# Payment Provider: Moyasar (test keys)
+```
+
+### Staging Environment
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Staging
+
+# Use staging databases
+# Enable full telemetry
+# Use test payment gateways
+```
+
+### Production Environment
+
+See [Aspire Deployment](/setup/aspire-deployment) or [Docker Deployment](/setup/docker-deployment) for production setup.
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Configuration" icon="gear" href="/setup/configuration">
+    Configure environment variables and settings
+  </Card>
+  
+  <Card title="Docker Deployment" icon="docker" href="/setup/docker-deployment">
+    Deploy using Docker Compose
+  </Card>
+  
+  <Card title="Aspire Deployment" icon="cloud" href="/setup/aspire-deployment">
+    Production deployment with Aspire
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+<CardGroup cols={2}>
+  <Card title=".NET Aspire Docs" icon="book" href="https://learn.microsoft.com/en-us/dotnet/aspire/">
+    Official .NET Aspire documentation
+  </Card>
+  
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture">
+    Learn about Masar Eagle architecture
+  </Card>
+</CardGroup>

@@ -1,0 +1,344 @@
+---
+title: 'Admin Wallet Operations'
+description: 'Administrative endpoints for managing driver, passenger, and company wallet deposits and withdrawals'
+---
+
+## Overview
+
+Admin wallet operations allow administrators to directly deposit or withdraw funds from driver, passenger, and company wallets. All operations require `AdminPolicy` authorization and are logged for audit purposes.
+
+## Driver Wallets
+
+### Deposit to Driver Wallet
+
+Deposit funds into a driver's wallet.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/drivers/{driverId}/wallet/deposit" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 500.00,
+    "currency": "SAR",
+    "transferReference": "TRF-2024-001",
+    "notes": "Commission refund for cancelled trip"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="amount" type="number" required>
+  Deposit amount (must be positive)
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (e.g., SAR, USD, EGP) or currency ID
+</ParamField>
+
+<ParamField body="transferReference" type="string" optional>
+  External transfer reference number
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the deposit
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="walletId" type="string">
+  Wallet identifier
+</ResponseField>
+
+<ResponseField name="newBalance" type="number">
+  Updated wallet balance after deposit
+</ResponseField>
+
+---
+
+### Withdraw from Driver Wallet
+
+Withdraw funds from a driver's wallet.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/drivers/{driverId}/wallet/withdraw" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 200.00,
+    "currency": "SAR",
+    "transferReference": "WD-2024-001",
+    "notes": "Manual withdrawal requested by driver"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="amount" type="number" required>
+  Withdrawal amount (must be positive and not exceed balance)
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (e.g., SAR, USD, EGP) or currency ID
+</ParamField>
+
+<ParamField body="transferReference" type="string" optional>
+  External transfer reference number
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the withdrawal
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="walletId" type="string">
+  Wallet identifier
+</ResponseField>
+
+<ResponseField name="newBalance" type="number">
+  Updated wallet balance after withdrawal
+</ResponseField>
+
+---
+
+## Passenger Wallets
+
+### Deposit to Passenger Wallet
+
+Deposit funds into a passenger's wallet.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/passengers/{passengerId}/wallet/deposit" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 150.00,
+    "currency": "SAR",
+    "transferReference": "REF-2024-456",
+    "notes": "Refund for cancelled booking"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="passengerId" type="string" required>
+  Passenger identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="amount" type="number" required>
+  Deposit amount (must be positive)
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (e.g., SAR, USD, EGP) or currency ID
+</ParamField>
+
+<ParamField body="transferReference" type="string" optional>
+  External transfer reference number
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the deposit
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="walletId" type="string">
+  Wallet identifier
+</ResponseField>
+
+<ResponseField name="newBalance" type="number">
+  Updated wallet balance after deposit
+</ResponseField>
+
+<Note>
+Passenger wallet deposits trigger a notification to the passenger about the credit.
+</Note>
+
+---
+
+## Company Wallets
+
+### Deposit to Company Wallet
+
+Deposit funds into a company's wallet.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/companies/{companyId}/wallet/deposit" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 5000.00,
+    "currency": "SAR",
+    "transferReference": "COMP-DEP-2024-789",
+    "notes": "Monthly credit for corporate account"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="amount" type="number" required>
+  Deposit amount (must be positive)
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (e.g., SAR, USD, EGP) or currency ID
+</ParamField>
+
+<ParamField body="transferReference" type="string" optional>
+  External transfer reference number
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the deposit
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="newBalance" type="number">
+  Updated wallet balance after deposit
+</ResponseField>
+
+---
+
+### Withdraw from Company Wallet
+
+Withdraw funds from a company's wallet.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.masareagle.com/api/admin/companies/{companyId}/wallet/withdraw" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000.00,
+    "currency": "SAR",
+    "transferReference": "COMP-WD-2024-123",
+    "notes": "Settlement payout"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company identifier
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="amount" type="number" required>
+  Withdrawal amount (must be positive and not exceed balance)
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (e.g., SAR, USD, EGP) or currency ID
+</ParamField>
+
+<ParamField body="transferReference" type="string" optional>
+  External transfer reference number
+</ParamField>
+
+<ParamField body="notes" type="string" optional>
+  Admin notes about the withdrawal
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message in Arabic
+</ResponseField>
+
+<ResponseField name="newBalance" type="number">
+  Updated wallet balance after withdrawal
+</ResponseField>
+
+---
+
+## Wallet Transaction History
+
+To view wallet transaction history for drivers, passengers, or companies, use the wallet query endpoints:
+
+- Get driver wallets: `GET /api/admin/wallets/drivers/{driverId}`
+- Get passenger wallets: `GET /api/admin/wallets/passengers/{passengerId}`
+- Get company wallets: `GET /api/admin/wallets/companies/{companyId}`
+- Get company wallet transactions: `GET /api/admin/wallets/companies/{companyId}/transactions`
+
+<Info>
+All wallet operations create transaction records that include:
+- Transaction type (deposit/withdraw)
+- Amount and currency
+- Balance before and after
+- Admin who performed the operation
+- Transfer reference
+- Timestamp
+- Notes
+</Info>
+
+<Warning>
+Wallet operations are irreversible. Ensure amounts and recipient details are correct before submitting. All operations are logged with the admin ID for audit purposes.
+</Warning>

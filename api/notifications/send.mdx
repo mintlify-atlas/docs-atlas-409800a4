@@ -1,0 +1,351 @@
+---
+title: "Send Notification"
+api: "POST https://api.masareagle.com/api/notifications/send"
+description: "Send push notifications to users via Firebase Cloud Messaging"
+---
+
+## Overview
+
+The Masar Eagle Notifications API processes notification messages through a message queue (RabbitMQ) and delivers them to registered devices via Firebase Cloud Messaging (FCM). Notifications are sent to users based on their registered device tokens and user type.
+
+<Note>
+This endpoint is triggered internally via message queue events. External API access may require proper authentication and authorization.
+</Note>
+
+## Notification Flow
+
+1. A notification message is published to the RabbitMQ exchange
+2. The Notifications service consumes the message from the queue
+3. Device tokens are retrieved for the recipient user
+4. Notification is sent via Firebase Cloud Messaging
+5. Notification history is saved to the database
+6. Admin users receive copies of certain notification types
+
+## Message Structure
+
+Notifications are sent as `NotificationMessage` objects through the message queue:
+
+<ParamField body="notificationId" type="string" required>
+  Unique notification identifier. Auto-generated with format `notif_{guid}`
+</ParamField>
+
+<ParamField body="type" type="enum" required>
+  Type of notification being sent. Determines the notification behavior and routing.
+  
+  **Trip Notifications:**
+  - `TripCreated` - New trip created
+  - `TripStarted` - Trip has started
+  - `TripCompleted` - Trip completed
+  - `TripReminder` - Reminder before trip starts
+  - `SimilarTripAvailable` - Similar trip available for passenger
+  - `DriverCancelledTrip` - Driver cancelled the trip
+  - `AdminCancelledTrip` - Admin cancelled the trip
+  - `TripReplaced` - Trip has been replaced
+  
+  **Booking Notifications:**
+  - `BookingCreated` - New booking request
+  - `BookingRejected` - Booking rejected
+  - `AdminBookedAccepted` - Admin accepted booking
+  - `DriverBookedAccepted` - Driver accepted booking
+  - `AdminAddedPassengerBooking` - Admin added passenger to trip
+  - `AdminBookedRejected` - Admin rejected booking
+  - `DriverBookedRejected` - Driver rejected booking
+  - `PassengerBookedCancelled` - Passenger cancelled booking
+  - `PassengerRemoved` - Passenger removed from trip
+  
+  **Driver Profile Notifications:**
+  - `DriverProfileSubmitted` - Driver submitted profile for review
+  - `DriverProfileFieldSubmitted` - Driver submitted profile field
+  - `DriverProfileFieldApproved` - Profile field approved
+  - `DriverProfileFieldRejected` - Profile field needs revision
+  - `DriverProfileApproved` - Full profile approved
+  - `DriverProfileReviewFinalized` - Profile review completed
+  
+  **Review Notifications:**
+  - `DriverReviewCreated` - Passenger reviewed driver
+  - `PassengerReviewCreated` - Driver reviewed passenger
+  - `CompanyReviewCreated` - Passenger reviewed company
+  
+  **Wallet Notifications:**
+  - `WalletDeposited` - Funds deposited to wallet
+  - `WalletWithdrawn` - Funds withdrawn from wallet
+  - `WalletDeducted` - Funds deducted from wallet
+  - `WalletRefunded` - Funds refunded to wallet
+  - `WalletUpdated` - Wallet balance updated
+  - `WalletTopUpPendingReview` - Top-up pending admin review
+  - `WalletTopUpApproved` - Top-up approved
+  - `WalletTopUpRejected` - Top-up rejected
+  
+  **Bank Transfer Notifications:**
+  - `BankTransferPendingReview` - Transfer pending review
+  - `BankTransferApproved` - Transfer approved
+  - `BankTransferRejected` - Transfer rejected
+  - `BankTransferConvertedToCash` - Transfer converted to cash
+  
+  **Company Notifications:**
+  - `CompanyNewBookingReceived` - New booking for company
+  - `CompanyDriverAssigned` - Driver assigned to booking
+  - `CompanyDriverUnassigned` - Driver unassigned from booking
+  - `CompanyPassengerDriverAssigned` - Driver assigned notification to passenger
+  - `CompanyPassengerDriverUnassigned` - Driver unassigned notification to passenger
+  - `CompanyBookingApproved` - Company approved booking
+  - `CompanyBookingRejected` - Company rejected booking
+  - `CompanyTripStarted` - Company trip started
+  - `CompanyTripCompleted` - Company trip completed
+  - `CompanyWalletTopUp` - Company wallet top-up
+  - `CompanyWalletCredited` - Company wallet credited
+  - `CompanyWalletDebited` - Company wallet debited
+  - `CompanyWalletDepositedByAdmin` - Admin deposited to company wallet
+  - `CompanyWalletWithdrawnByAdmin` - Admin withdrew from company wallet
+  - Plus additional company public trip notifications
+  
+  **User Notifications:**
+  - `PassengerCreated` - New passenger registered
+  - `DriverCreated` - New driver registered
+  - `CompanyCreated` - New company registered
+  - `UserAuthenticated` - User logged in
+</ParamField>
+
+<ParamField body="recipientId" type="string" required>
+  ID of the user receiving the notification
+</ParamField>
+
+<ParamField body="recipientType" type="enum" required>
+  Type of recipient user:
+  - `Driver` - Driver user
+  - `Passenger` - Passenger user
+  - `Admin` - Admin user
+  - `Company` - Company user
+  - `System` - System notification
+</ParamField>
+
+<ParamField body="title" type="string" required>
+  Notification title displayed to the user
+</ParamField>
+
+<ParamField body="body" type="string" required>
+  Notification body message displayed to the user
+</ParamField>
+
+<ParamField body="data" type="object">
+  Additional data payload sent with the notification. Common fields include:
+  - `notificationId` - Notification ID
+  - `isRead` - Read status (string "true"/"false")
+  - `type` - Notification type
+  - `tripId` - Related trip ID
+  - `bookingId` - Related booking ID
+  - `tripFrom` - Trip origin
+  - `tripTo` - Trip destination
+  - `departureTime` - Departure time (ISO 8601)
+  - `arrivalTime` - Arrival time (ISO 8601)
+  - `driverName` - Driver name
+  - `passengerName` - Passenger name
+  - `companyName` - Company name
+  - `rating` - Rating value
+  - `comment` - Review comment
+  - `reason` - Cancellation/rejection reason
+  - `requestedSeatsCount` - Number of seats
+  - `isAdminAction` - Whether action was by admin (string "true"/"false")
+  - Custom fields based on notification type
+</ParamField>
+
+<ParamField body="createdAtUtc" type="datetime">
+  Timestamp when notification was created (ISO 8601 format). Defaults to current UTC time.
+</ParamField>
+
+## Response
+
+Notifications are processed asynchronously through the message queue. Success/failure is logged internally.
+
+<ResponseField name="successCount" type="number">
+  Number of devices that successfully received the notification
+</ResponseField>
+
+<ResponseField name="failureCount" type="number">
+  Number of devices that failed to receive the notification
+</ResponseField>
+
+<ResponseField name="notificationId" type="string">
+  The unique identifier for this notification
+</ResponseField>
+
+## Firebase Cloud Messaging
+
+Notifications are delivered using Firebase Cloud Messaging with the following structure:
+
+```json
+{
+  "notification": {
+    "title": "Notification Title",
+    "body": "Notification Body"
+  },
+  "data": {
+    "notificationId": "notif_abc123",
+    "isRead": "false",
+    "type": "TripCreated",
+    // Additional custom data fields
+  },
+  "token": "device_fcm_token"
+}
+```
+
+### Batch Notifications
+
+When multiple device tokens exist for a user, notifications are sent in batch using FCM's multicast messaging for better performance.
+
+## Admin Notification Forwarding
+
+Certain notification types are automatically forwarded to admin users:
+
+- Driver and passenger notifications (except specific exclusions)
+- Wallet notifications are NOT forwarded to admin
+- Bank transfer notifications are NOT forwarded to admin
+- Admin-initiated actions are NOT forwarded to admin
+- Company-related notifications are NOT forwarded to admin
+
+Admin notifications include additional metadata:
+- `originalNotificationId` - Original notification ID
+- `originalRecipientId` - Original recipient ID
+- `originalRecipientType` - Original recipient type
+
+## Examples
+
+### Trip Created Notification
+
+```json
+{
+  "notificationId": "notif_550e8400-e29b-41d4-a716-446655440000",
+  "type": "TripCreated",
+  "recipientId": "passenger_123",
+  "recipientType": "Passenger",
+  "title": "رحلة جديدة متاحة",
+  "body": "تم إنشاء رحلة جديدة من الرياض إلى جدة",
+  "data": {
+    "tripId": "trip_789",
+    "tripFrom": "الرياض",
+    "tripTo": "جدة",
+    "departureTime": "2024-03-15T08:00:00Z",
+    "arrivalTime": "2024-03-15T18:00:00Z",
+    "driverName": "أحمد محمد",
+    "availableSeats": "3"
+  },
+  "createdAtUtc": "2024-03-10T10:30:00Z"
+}
+```
+
+### Booking Accepted Notification
+
+```json
+{
+  "notificationId": "notif_660e8400-e29b-41d4-a716-446655440001",
+  "type": "DriverBookedAccepted",
+  "recipientId": "passenger_456",
+  "recipientType": "Passenger",
+  "title": "تم قبول طلب الحجز",
+  "body": "السائق أحمد قبل طلب حجزك للرحلة من الرياض إلى جدة",
+  "data": {
+    "bookingId": "booking_321",
+    "tripId": "trip_789",
+    "tripFrom": "الرياض",
+    "tripTo": "جدة",
+    "departureTime": "2024-03-15T08:00:00Z",
+    "driverName": "أحمد محمد",
+    "requestedSeatsCount": "2"
+  },
+  "createdAtUtc": "2024-03-10T11:00:00Z"
+}
+```
+
+### Wallet Deposited Notification
+
+```json
+{
+  "notificationId": "notif_770e8400-e29b-41d4-a716-446655440002",
+  "type": "WalletDeposited",
+  "recipientId": "driver_789",
+  "recipientType": "Driver",
+  "title": "تم إيداع مبلغ في محفظتك",
+  "body": "تم إيداع 500 ريال في محفظتك",
+  "data": {
+    "amount": "500",
+    "currency": "SAR",
+    "transactionId": "txn_123456",
+    "newBalance": "1500"
+  },
+  "createdAtUtc": "2024-03-10T12:00:00Z"
+}
+```
+
+### Driver Profile Review Notification
+
+```json
+{
+  "notificationId": "notif_880e8400-e29b-41d4-a716-446655440003",
+  "type": "DriverProfileFieldRejected",
+  "recipientId": "driver_999",
+  "recipientType": "Driver",
+  "title": "يرجى تحديث معلومات الملف الشخصي",
+  "body": "صورة رخصة القيادة تحتاج إلى تحديث",
+  "data": {
+    "fieldName": "DrivingLicense",
+    "fieldDisplayName": "رخصة القيادة",
+    "note": "الصورة غير واضحة، يرجى رفع صورة أوضح"
+  },
+  "createdAtUtc": "2024-03-10T13:00:00Z"
+}
+```
+
+## Notification History
+
+All sent notifications are saved to the database with the following information:
+
+- Notification ID, type, recipient details
+- Title and body content
+- Data payload (JSON)
+- Sent timestamp
+- Read status and read timestamp
+
+Notifications are automatically saved to the database with their delivery status and can be retrieved through the notification history queries in the database.
+
+## Error Handling
+
+The notification service handles various error scenarios:
+
+<ResponseField name="No Device Tokens">
+  If a user has no registered device tokens, the notification is still saved to history but not delivered. A warning is logged.
+</ResponseField>
+
+<ResponseField name="Invalid Device Token">
+  If a device token is invalid or expired, Firebase returns an error. The service logs the failure and continues with other tokens.
+</ResponseField>
+
+<ResponseField name="Firebase Service Error">
+  If Firebase service is unavailable, the error is logged and the notification processing fails. The message remains in the queue for retry.
+</ResponseField>
+
+<ResponseField name="Batch Send Failure">
+  If batch sending fails, the service falls back to sending to each device individually.
+</ResponseField>
+
+## Rate Limits
+
+<Warning>
+Firebase Cloud Messaging has rate limits:
+- 10,000 messages per second per project
+- 1,000 multicast messages per second
+
+The service automatically uses batch sending when appropriate to optimize throughput.
+</Warning>
+
+## Best Practices
+
+1. **Data Payload**: Keep data payloads small (< 4KB) for optimal delivery
+2. **Localization**: Send localized title and body text based on user preferences
+3. **Rich Content**: Use data fields to enable rich notifications in mobile apps
+4. **Timestamps**: Always include relevant timestamps in ISO 8601 format
+5. **IDs**: Include all relevant IDs (trip, booking, user) for deep linking
+6. **Admin Actions**: Set `isAdminAction: "true"` for admin-initiated notifications
+
+## Related Endpoints
+
+- [Register Device Token](/api/notifications/device-tokens) - Register device for notifications

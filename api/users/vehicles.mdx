@@ -1,0 +1,552 @@
+---
+title: 'Vehicles'
+description: 'Manage vehicle registrations, images, and types in Masar Eagle'
+icon: 'car'
+---
+
+## Overview
+
+The Vehicles API provides endpoints for managing vehicle registrations, images, and vehicle types. Drivers can add, update, and delete their vehicles, while admins have full access to all vehicle operations.
+
+## Authentication
+
+All endpoints require authentication. Include the JWT token in the Authorization header:
+
+```bash
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+---
+
+## List Driver Vehicles
+
+<api-endpoint method="GET" endpoint="/api/vehicles" />
+
+Get all vehicles belonging to the authenticated driver with images and vehicle type information.
+
+### Response
+
+<ResponseField name="Vehicles" type="array">
+  List of driver's vehicles
+  <expandable>
+    <ResponseField name="Id" type="string">
+      Vehicle unique identifier
+    </ResponseField>
+    <ResponseField name="Name" type="string">
+      Vehicle name
+    </ResponseField>
+    <ResponseField name="Model" type="string">
+      Vehicle model
+    </ResponseField>
+    <ResponseField name="VehicleTypeId" type="string">
+      Vehicle type identifier
+    </ResponseField>
+    <ResponseField name="VehicleTypeName" type="string">
+      Vehicle type name (e.g., Sedan, SUV)
+    </ResponseField>
+    <ResponseField name="VehicleTypeIconUrl" type="string" nullable>
+      URL to vehicle type icon
+    </ResponseField>
+    <ResponseField name="ImageUrls" type="array">
+      Array of vehicle image URLs
+    </ResponseField>
+    <ResponseField name="CreatedAt" type="datetime">
+      Creation timestamp
+    </ResponseField>
+    <ResponseField name="UpdatedAt" type="datetime" nullable>
+      Last update timestamp
+    </ResponseField>
+    <ResponseField name="CanDelete" type="boolean">
+      Whether vehicle can be deleted (false if used in trips)
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="TotalCount" type="integer">
+  Total number of vehicles
+</ResponseField>
+
+<ResponseField name="Message" type="string">
+  Status message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/vehicles" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "Vehicles": [
+    {
+      "Id": "v_456789",
+      "Name": "تويوتا كامري",
+      "Model": "2022",
+      "VehicleTypeId": "vt_001",
+      "VehicleTypeName": "Sedan",
+      "VehicleTypeIconUrl": "/uploads/vehicle-types/sedan.svg",
+      "ImageUrls": [
+        "/uploads/vehicles/v_456789/image1.jpg",
+        "/uploads/vehicles/v_456789/image2.jpg"
+      ],
+      "CreatedAt": "2024-02-01T12:00:00Z",
+      "UpdatedAt": "2024-02-15T10:30:00Z",
+      "CanDelete": true
+    }
+  ],
+  "TotalCount": 1,
+  "Message": "عرض 1 إلى 1 من 1 عنصر"
+}
+```
+
+---
+
+## Add Vehicle with Images
+
+<api-endpoint method="POST" endpoint="/api/vehicles/{driverId}/with-images" />
+
+Add a new vehicle with optional image uploads. Supports multipart/form-data.
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver unique identifier
+</ParamField>
+
+### Request Body (Form Data)
+
+<ParamField body="Name" type="string" required>
+  Vehicle name (2-100 characters)
+</ParamField>
+
+<ParamField body="Model" type="string" required>
+  Vehicle model/year (2-50 characters)
+</ParamField>
+
+<ParamField body="VehicleTypeId" type="string" required>
+  Vehicle type identifier
+</ParamField>
+
+<ParamField body="Images" type="file[]" optional>
+  Vehicle images (JPEG, PNG, WebP - max 5 images, 10MB each)
+</ParamField>
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Created vehicle ID
+</ResponseField>
+
+<ResponseField name="Name" type="string">
+  Vehicle name
+</ResponseField>
+
+<ResponseField name="Model" type="string">
+  Vehicle model
+</ResponseField>
+
+<ResponseField name="VehicleTypeId" type="string">
+  Vehicle type ID
+</ResponseField>
+
+<ResponseField name="ImageUrls" type="array">
+  Uploaded image URLs
+</ResponseField>
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/vehicles/d_123456/with-images" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "Name=تويوتا كامري" \
+  -F "Model=2022" \
+  -F "VehicleTypeId=vt_001" \
+  -F "Images=@vehicle-front.jpg" \
+  -F "Images=@vehicle-side.jpg"
+```
+
+### Example Response
+
+```json
+{
+  "Id": "v_456789",
+  "Name": "تويوتا كامري",
+  "Model": "2022",
+  "VehicleTypeId": "vt_001",
+  "ImageUrls": [
+    "/uploads/vehicles/v_456789/image1.jpg",
+    "/uploads/vehicles/v_456789/image2.jpg"
+  ],
+  "Message": "تم إضافة المركبة بنجاح"
+}
+```
+
+---
+
+## Batch Add Vehicles with Images
+
+<api-endpoint method="POST" endpoint="/api/vehicles/{driverId}/batch/with-images" />
+
+Add multiple vehicles in a single batch operation with optional images.
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver unique identifier
+</ParamField>
+
+### Request Body (Form Data)
+
+<ParamField body="vehicles[0].Name" type="string" required>
+  First vehicle name
+</ParamField>
+
+<ParamField body="vehicles[0].Model" type="string" required>
+  First vehicle model
+</ParamField>
+
+<ParamField body="vehicles[0].VehicleTypeId" type="string" required>
+  First vehicle type ID
+</ParamField>
+
+<ParamField body="vehicles[0].Images" type="file[]" optional>
+  First vehicle images
+</ParamField>
+
+<ParamField body="vehicles[1].*" type="object" optional>
+  Second vehicle (same structure as first)
+</ParamField>
+
+### Response
+
+<ResponseField name="SuccessCount" type="integer">
+  Number of successfully added vehicles
+</ResponseField>
+
+<ResponseField name="FailureCount" type="integer">
+  Number of failed vehicle additions
+</ResponseField>
+
+<ResponseField name="Vehicles" type="array">
+  List of successfully added vehicles
+</ResponseField>
+
+<ResponseField name="Errors" type="array">
+  List of errors for failed vehicles
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/vehicles/d_123456/batch/with-images" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "vehicles[0].Name=تويوتا كامري" \
+  -F "vehicles[0].Model=2022" \
+  -F "vehicles[0].VehicleTypeId=vt_001" \
+  -F "vehicles[0].Images=@car1.jpg" \
+  -F "vehicles[1].Name=هوندا أكورد" \
+  -F "vehicles[1].Model=2021" \
+  -F "vehicles[1].VehicleTypeId=vt_001"
+```
+
+---
+
+## Get Vehicle by ID
+
+<api-endpoint method="GET" endpoint="/api/vehicles/{vehicleId}" />
+
+Get detailed information about a specific vehicle.
+
+### Path Parameters
+
+<ParamField path="vehicleId" type="string" required>
+  Vehicle unique identifier
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/vehicles/v_456789" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Update Vehicle
+
+<api-endpoint method="PUT" endpoint="/api/vehicles/{driverId}/{vehicleId}" />
+
+Update vehicle information and images.
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver unique identifier
+</ParamField>
+
+<ParamField path="vehicleId" type="string" required>
+  Vehicle unique identifier
+</ParamField>
+
+### Request Body (Form Data)
+
+<ParamField body="Name" type="string" optional>
+  Updated vehicle name
+</ParamField>
+
+<ParamField body="Model" type="string" optional>
+  Updated vehicle model
+</ParamField>
+
+<ParamField body="VehicleTypeId" type="string" optional>
+  Updated vehicle type ID
+</ParamField>
+
+<ParamField body="Images" type="file[]" optional>
+  New vehicle images (replaces existing)
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/vehicles/d_123456/v_456789" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "Name=تويوتا كامري جراند" \
+  -F "Model=2023"
+```
+
+---
+
+## Delete Vehicle
+
+<api-endpoint method="DELETE" endpoint="/api/vehicles/{driverId}/{vehicleId}" />
+
+Delete a vehicle and all associated images. Only allowed if vehicle has no trip history.
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver unique identifier
+</ParamField>
+
+<ParamField path="vehicleId" type="string" required>
+  Vehicle unique identifier (must start with "v_")
+</ParamField>
+
+### Response
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/vehicles/d_123456/v_456789" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "Message": "تم حذف المركبة بنجاح"
+}
+```
+
+---
+
+## Get Driver Vehicles
+
+<api-endpoint method="GET" endpoint="/api/vehicles/driver/{driverId}" />
+
+Get all vehicles for a specific driver. Useful for admin operations.
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  Driver unique identifier
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/vehicles/driver/d_123456" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Get Vehicle Images
+
+<api-endpoint method="GET" endpoint="/api/vehicles/{vehicleId}/images" />
+
+Get all images for a specific vehicle.
+
+### Path Parameters
+
+<ParamField path="vehicleId" type="string" required>
+  Vehicle unique identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="Images" type="array">
+  Array of image objects
+  <expandable>
+    <ResponseField name="Id" type="string">
+      Image ID
+    </ResponseField>
+    <ResponseField name="ImageUrl" type="string">
+      Image URL
+    </ResponseField>
+    <ResponseField name="DisplayOrder" type="integer">
+      Display order (0-based)
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/vehicles/v_456789/images" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Admin: List All Vehicles
+
+<api-endpoint method="GET" endpoint="/api/admin/vehicles" />
+
+Retrieve all vehicles in the system. **Admin only**.
+
+### Response
+
+Same structure as List Driver Vehicles, but includes vehicles from all drivers.
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/vehicles" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Vehicle Types
+
+### List Vehicle Types
+
+<api-endpoint method="GET" endpoint="/api/vehicle-types" />
+
+Get all available vehicle types.
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Items per page
+</ParamField>
+
+<ParamField query="IsActive" type="boolean" optional>
+  Filter by active status
+</ParamField>
+
+### Response
+
+<ResponseField name="VehicleTypes" type="array">
+  List of vehicle types
+  <expandable>
+    <ResponseField name="Id" type="string">
+      Vehicle type ID
+    </ResponseField>
+    <ResponseField name="Name" type="string">
+      Vehicle type name
+    </ResponseField>
+    <ResponseField name="SeatCount" type="integer">
+      Number of seats
+    </ResponseField>
+    <ResponseField name="IconUrl" type="string" nullable>
+      URL to vehicle type icon
+    </ResponseField>
+    <ResponseField name="IsActive" type="boolean">
+      Active status
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/vehicle-types?IsActive=true"
+```
+
+### Example Response
+
+```json
+{
+  "VehicleTypes": [
+    {
+      "Id": "vt_001",
+      "Name": "Sedan",
+      "SeatCount": 4,
+      "IconUrl": "/uploads/vehicle-types/sedan.svg",
+      "IsActive": true
+    },
+    {
+      "Id": "vt_002",
+      "Name": "SUV",
+      "SeatCount": 7,
+      "IconUrl": "/uploads/vehicle-types/suv.svg",
+      "IsActive": true
+    }
+  ],
+  "TotalCount": 2
+}
+```
+
+---
+
+## Error Responses
+
+All endpoints may return the following error responses:
+
+<ResponseField name="message" type="string">
+  Error message in Arabic or English
+</ResponseField>
+
+<ResponseField name="errors" type="array" optional>
+  Detailed validation errors
+</ResponseField>
+
+### Common Error Codes
+
+- `400 Bad Request` - Invalid request parameters or validation errors
+- `401 Unauthorized` - Missing or invalid authentication token
+- `403 Forbidden` - Insufficient permissions or vehicle has trips
+- `404 Not Found` - Vehicle or vehicle type not found
+- `413 Payload Too Large` - Image file too large
+- `500 Internal Server Error` - Server error
+
+### Example Error Response
+
+```json
+{
+  "message": "فشل التحقق من صحة البيانات",
+  "errors": [
+    "Vehicle 1: اسم المركبة مطلوب"
+  ]
+}
+```

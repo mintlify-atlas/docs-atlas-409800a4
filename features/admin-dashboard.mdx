@@ -1,0 +1,621 @@
+---
+title: 'Admin Dashboard'
+description: 'Comprehensive admin features for platform management, reports, and financial oversight'
+icon: 'gauge-high'
+---
+
+## Overview
+
+The Admin Dashboard provides comprehensive tools for platform administrators to manage users, trips, bookings, financial operations, and generate reports. Admins have elevated permissions to oversee all platform activities and intervene when necessary.
+
+## Admin Authentication
+
+All admin endpoints require the `AdminPolicy` authorization:
+
+```csharp src/services/Trips/Trips.Api/Features/AdminTripManagement/AdminTripManagementEndpoints.cs
+RouteGroupBuilder group = app.MapGroup("/api/admin/trips")
+    .RequireAuthorization("AdminPolicy")
+    .WithTags("Admin Trip Management")
+    .WithOpenApi();
+```
+
+<Warning>
+Admin operations are logged and audited. All actions require valid admin credentials and proper authorization.
+</Warning>
+
+## Trip Management
+
+### View All Trip Requests
+
+Admins can view booking requests for any trip:
+
+```http
+GET /api/admin/trips/{tripId}/requests?status=Pending
+```
+
+**Query Parameters:**
+- `status` (optional): Filter by booking status (Pending, Confirmed, Rejected, Cancelled)
+
+**Response:**
+```json
+{
+  "success": true,
+  "tripId": "t_abc123",
+  "requests": [
+    {
+      "bookingId": "b_xyz789",
+      "passengerId": "p_123456",
+      "passengerName": "Mohammed Ahmed",
+      "requestedSeats": 2,
+      "totalPrice": 500.00,
+      "currency": "SAR",
+      "paymentMethod": "Wallet",
+      "status": "Pending",
+      "requestedAt": "2026-03-10T12:00:00Z"
+    }
+  ]
+}
+```
+
+### Accept Booking Request
+
+```http
+POST /api/admin/trips/{tripId}/requests/{bookingId}/accept
+```
+
+```json
+{
+  "notes": "Approved by admin on driver's behalf"
+}
+```
+
+```csharp src/services/Trips/Trips.Api/Features/AdminTripManagement/AdminTripManagementEndpoints.cs
+group.MapPost("/{tripId}/requests/{bookingId}/accept", async (
+    string tripId,
+    string bookingId,
+    [FromBody] AdminAcceptRequestRequest request,
+    [FromServices] IMediator mediator,
+    ClaimsPrincipal user,
+    CancellationToken cancellationToken) =>
+{
+    string? adminId = user.GetUserId();
+    if (string.IsNullOrEmpty(adminId))
+        return Results.Unauthorized();
+
+    var command = new AdminAcceptRequestCommand(
+        tripId, bookingId, adminId, request.Notes);
+
+    AdminAcceptRequestResponse response = await mediator.Send(command, cancellationToken);
+    return response.Success ? Results.Ok(response) : Results.BadRequest(response);
+})
+```
+
+### Reject Booking Request
+
+```http
+POST /api/admin/trips/{tripId}/requests/{bookingId}/reject
+```
+
+```json
+{
+  "reason": "Passenger has outstanding payment issues"
+}
+```
+
+### Add Passenger Directly
+
+Admins can add passengers to trips without requiring approval:
+
+```http
+POST /api/admin/trips/{tripId}/passengers
+```
+
+```json
+{
+  "passengerId": "p_123456",
+  "requestedSeatsCount": 1,
+  "paymentMethod": "Cash",
+  "notes": "Special booking from customer service"
+}
+```
+
+### Remove Passenger from Trip
+
+```http
+DELETE /api/admin/trips/{tripId}/passengers/{passengerId}?reason=Duplicate+booking
+```
+
+### Cancel Trip
+
+```http
+POST /api/admin/trips/{tripId}/cancel
+```
+
+```json
+{
+  "reason": "Driver unavailable due to emergency"
+}
+```
+
+### View Cancelled Trips
+
+```http
+GET /api/admin/trips/cancellations
+```
+
+**Query Parameters:**
+- `driverId` - Filter by driver
+- `from` - Filter by departure location
+- `to` - Filter by destination
+- `cancelledFrom` - Start date of cancellation period
+- `cancelledTo` - End date of cancellation period
+- `departureFrom` - Start date of original departure
+- `departureTo` - End date of original departure
+- `page` - Page number (default: 1)
+- `pageSize` - Items per page (default: 50)
+
+**Response:**
+```json
+{
+  "success": true,
+  "trips": [
+    {
+      "tripId": "t_abc123",
+      "driverId": "d_789012",
+      "driverName": "Ahmed Ali",
+      "from": "Riyadh",
+      "to": "Jeddah",
+      "departureTime": "2026-03-15T08:00:00Z",
+      "cancelledAt": "2026-03-14T10:30:00Z",
+      "cancelReason": "Vehicle breakdown",
+      "confirmedBookings": 3,
+      "totalPassengers": 5
+    }
+  ],
+  "totalCount": 15,
+  "page": 1,
+  "pageSize": 50
+}
+```
+
+## Trip Replacement
+
+When a trip is cancelled, admins can replace it with a new driver or existing trip:
+
+### Replace with New Driver
+
+```http
+POST /api/admin/trips/{tripId}/replace-with-driver
+```
+
+```json
+{
+  "newDriverId": "d_456789",
+  "vehicleId": "v_012345",
+  "transferAllBookings": true,
+  "notes": "Replacement driver assigned due to original driver emergency"
+}
+```
+
+<Steps>
+  <Step title="Validate Replacement Driver">
+    Ensures the new driver is available for the trip time slot.
+  </Step>
+  
+  <Step title="Create New Trip">
+    Creates a new trip with the same route and details.
+  </Step>
+  
+  <Step title="Transfer Bookings">
+    Moves all confirmed bookings from cancelled trip to new trip.
+  </Step>
+  
+  <Step title="Notify Users">
+    Sends notifications to all affected passengers and the new driver.
+  </Step>
+</Steps>
+
+### Replace with Existing Trip
+
+```http
+POST /api/admin/trips/{tripId}/replace-with-trip
+```
+
+```json
+{
+  "replacementTripId": "t_def456",
+  "transferAllBookings": true,
+  "notes": "Merged with existing trip on same route"
+}
+```
+
+### Get Replacement Options
+
+Find suitable replacement trips or drivers:
+
+```http
+GET /api/admin/trips/{tripId}/replacement-options
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "matchingTrips": [
+    {
+      "tripId": "t_def456",
+      "driverId": "d_456789",
+      "driverName": "Khalid Mohammed",
+      "from": "Riyadh",
+      "to": "Jeddah",
+      "departureTime": "2026-03-15T09:00:00Z",
+      "availableSeats": 3,
+      "price": 250.00
+    }
+  ],
+  "availableDrivers": [
+    {
+      "driverId": "d_789456",
+      "name": "Omar Hassan",
+      "rating": 4.8,
+      "vehicles": [
+        {
+          "vehicleId": "v_123789",
+          "type": "Sedan",
+          "seatCount": 4
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Get Available Drivers
+
+Search for drivers available to take over a trip:
+
+```http
+GET /api/admin/trips/{tripId}/available-drivers?searchNameOrPhone=Ahmed
+```
+
+## Financial Dashboard
+
+### View Revenue Statistics
+
+```http
+GET /api/admin/statistics/revenue
+```
+
+```csharp src/services/Trips/Trips.Api/Features/AdminStatistics/GetRevenue/GetRevenueEndpoint.cs
+app.MapGet("/api/admin/statistics/revenue", async (
+    [FromServices] IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var query = new GetRevenueQuery();
+    GetRevenueResponse result = await mediator.Send(query, cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+})
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "totalRevenue": 125000.00,
+  "currency": "SAR",
+  "totalTrips": 450,
+  "completedTrips": 420,
+  "totalCommission": 12500.00,
+  "period": "all-time"
+}
+```
+
+### View Trip Movement Statistics
+
+```http
+GET /api/admin/statistics/trips-movement?period=today
+```
+
+**Available Periods:**
+- `today` - Statistics for current day
+- `week` - Statistics for current week
+- `month` - Statistics for current month
+
+```csharp src/services/Trips/Trips.Api/Features/AdminStatistics/GetTripsMovement/GetTripsMovementEndpoint.cs
+app.MapGet("/api/admin/statistics/trips-movement", async (
+    [FromServices] IMediator mediator,
+    [FromQuery] string period = "today",
+    CancellationToken cancellationToken = default) =>
+{
+    var query = new GetTripsMovementQuery { Period = period };
+    GetTripsMovementResponse result = await mediator.Send(query, cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+})
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "period": "today",
+  "scheduled": 25,
+  "inProgress": 8,
+  "completed": 12,
+  "cancelled": 2,
+  "totalBookings": 68,
+  "confirmedBookings": 45,
+  "pendingBookings": 15,
+  "rejectedBookings": 8
+}
+```
+
+## Wallet Management
+
+### Withdraw from Driver Wallet
+
+Process driver withdrawal requests:
+
+```http
+POST /api/admin/drivers/{driverId}/wallet/withdraw
+```
+
+```json
+{
+  "amount": 1000.00,
+  "currency": "SAR",
+  "transferReference": "IBAN: SA1234567890, Transfer ID: TRX123456",
+  "notes": "Weekly withdrawal request processed"
+}
+```
+
+**Implementation:**
+```csharp src/services/Trips/Trips.Api/Features/Admin/DriverWallets/WithdrawFromDriverWallet.cs
+public sealed class WithdrawFromDriverWalletHandler(
+    IWalletOperationService walletOps,
+    IUsersApiService usersApiService,
+    ILogger<WithdrawFromDriverWalletHandler> logger,
+    IMessageBus messageBus)
+    : IRequestHandler<WithdrawFromDriverWalletCommand, WithdrawFromDriverWalletResponse>
+{
+    public async Task<WithdrawFromDriverWalletResponse> Handle(
+        WithdrawFromDriverWalletCommand request, 
+        CancellationToken cancellationToken)
+    {
+        string currencyCode = await CurrencyResolver.ResolveCodeAsync(
+            request.Currency, usersApiService, cancellationToken);
+
+        var result = await walletOps.AdminWithdrawFromDriverAsync(
+            new AdminWithdrawFromDriverRequest(
+                request.DriverId,
+                currencyCode,
+                request.Amount,
+                request.AdminId,
+                request.TransferReference,
+                request.Notes),
+            cancellationToken);
+
+        await (result.Success
+            ? messageBus.PublishAsync(new WalletWithdrawnNotification(
+                request.DriverId,
+                request.Amount,
+                currencyCode,
+                result.BalanceAfter,
+                request.TransferReference))
+            : ValueTask.CompletedTask);
+
+        return new WithdrawFromDriverWalletResponse
+        {
+            Success = result.Success,
+            Message = result.Success
+                ? $"تم سحب {request.Amount} {currencyCode} بنجاح"
+                : result.ErrorMessage ?? "فشل في سحب المبلغ",
+            NewBalance = result.BalanceAfter
+        };
+    }
+}
+```
+
+### Approve Wallet Top-Up
+
+Review and approve passenger wallet top-up requests:
+
+```http
+POST /api/wallet/top-up/bank-transfer/{transferId}/approve
+```
+
+```json
+{
+  "verifiedAmount": 500.00
+}
+```
+
+### Reject Wallet Top-Up
+
+```http
+POST /api/wallet/top-up/bank-transfer/{transferId}/reject
+```
+
+```json
+{
+  "reason": "Receipt image is unclear. Please resubmit with a clearer image."
+}
+```
+
+## Bank Transfer Management
+
+Admins review and process all bank transfer requests:
+
+### View Pending Transfers
+
+```http
+GET /api/admin/bank-transfers?status=Pending&type=WalletTopUp
+```
+
+**Transfer Types:**
+- `WalletTopUp` - Wallet recharge requests
+- `Booking` - Trip booking payments
+
+## User Management
+
+### List Admins
+
+```http
+GET /api/admin/admins?page=1&pageSize=20
+```
+
+### Create Admin
+
+```http
+POST /api/admin/admins
+```
+
+### Update Admin
+
+```http
+PUT /api/admin/admins/{adminId}
+```
+
+### Delete Admin
+
+```http
+DELETE /api/admin/admins/{adminId}
+```
+
+## Review Management
+
+### View All Driver Reviews
+
+```http
+GET /api/admin/driver-reviews?page=1&pageSize=50
+```
+
+### Delete Inappropriate Review
+
+```http
+DELETE /api/driver-reviews/{reviewId}
+DELETE /api/passenger-reviews/{reviewId}
+```
+
+<Note>
+Deleting a review automatically recalculates the overall rating for the affected user.
+</Note>
+
+## Company Management
+
+### List All Companies
+
+```http
+GET /api/admin/companies?page=1&pageSize=20&searchName=Transport
+```
+
+### View Company Details
+
+```http
+GET /api/admin/companies/{companyId}
+```
+
+### Update Company
+
+```http
+PUT /api/admin/companies/{companyId}
+```
+
+### Withdraw from Company Wallet
+
+```http
+POST /api/admin/companies/{companyId}/wallet/withdraw
+```
+
+## Currency Management
+
+### List Currencies
+
+```http
+GET /api/admin/currencies
+```
+
+### Create Currency
+
+```http
+POST /api/admin/currencies
+```
+
+### Update Currency
+
+```http
+PUT /api/admin/currencies/{currencyId}
+```
+
+## Commission Policies
+
+### List Commission Policies
+
+```http
+GET /api/admin/commission-policies
+```
+
+### Create Commission Policy
+
+```http
+POST /api/admin/commission-policies
+```
+
+### Update Commission Policy
+
+```http
+PUT /api/admin/commission-policies/{policyId}
+```
+
+## Audit & Logging
+
+All admin actions are logged for audit purposes:
+
+```csharp
+logger.LogInformation(
+    "Admin {AdminId} cancelled trip {TripId} with reason: {Reason}",
+    adminId, tripId, reason);
+```
+
+<Warning>
+Admin logs are immutable and stored for compliance purposes. All actions are traceable.
+</Warning>
+
+## Dashboard Metrics
+
+<CardGroup cols={2}>
+  <Card title="Active Users" icon="users">
+    Total active drivers, passengers, and companies
+  </Card>
+  
+  <Card title="Revenue" icon="money-bill-trend-up">
+    Total platform revenue and commission earnings
+  </Card>
+  
+  <Card title="Trip Volume" icon="chart-line">
+    Scheduled, in-progress, and completed trips
+  </Card>
+  
+  <Card title="Pending Actions" icon="bell">
+    Bank transfers, reviews, and bookings requiring attention
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Review Regularly" icon="calendar-check">
+    Check pending transfers and bookings daily to ensure smooth operations.
+  </Card>
+  
+  <Card title="Document Actions" icon="file-pen">
+    Always add notes when performing manual interventions.
+  </Card>
+  
+  <Card title="Monitor Metrics" icon="chart-pie">
+    Track key performance indicators to identify trends and issues.
+  </Card>
+  
+  <Card title="Handle Disputes" icon="handshake">
+    Mediate between drivers and passengers fairly and promptly.
+  </Card>
+</CardGroup>

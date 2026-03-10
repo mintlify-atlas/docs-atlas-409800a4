@@ -1,0 +1,620 @@
+---
+title: Adding Features
+description: How to implement new features using Masar Eagle's architecture patterns
+---
+
+Masar Eagle uses a **Vertical Slice Architecture** with feature-based organization. Each feature is self-contained with its own endpoint, handler, request/response models, and validation.
+
+## Feature Structure
+
+Features are organized in the `Features/` directory within each service. Each feature typically contains:
+
+```
+Features/
+└── BookSeat/
+    ├── BookSeatEndpoint.cs      # API endpoint definition
+    ├── BookSeatHandler.cs       # Business logic (MediatR handler)
+    ├── BookSeatRequest.cs       # Request DTO
+    ├── BookSeatResponse.cs      # Response DTO
+    └── BookSeatValidator.cs     # FluentValidation rules (optional)
+```
+
+## Step-by-Step Guide
+
+### 1. Create Feature Directory
+
+Create a new directory for your feature under `src/services/{ServiceName}/{ServiceName}.Api/Features/`.
+
+```bash
+mkdir -p src/services/Trips/Trips.Api/Features/MyNewFeature
+```
+
+### 2. Define Request and Response Models
+
+Create DTOs for your feature's input and output.
+
+<CodeGroup>
+```csharp MyFeatureRequest.cs
+using System.ComponentModel.DataAnnotations;
+
+namespace Trips.Api.Features.MyFeature;
+
+public class MyFeatureRequest
+{
+    [Required(ErrorMessage = "Trip ID is required")]
+    public string TripId { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "User ID is required")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Range(1, 100, ErrorMessage = "Count must be between 1 and 100")]
+    public int Count { get; set; }
+}
+```
+
+```csharp MyFeatureResponse.cs
+namespace Trips.Api.Features.MyFeature;
+
+public class MyFeatureResponse
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string? ResourceId { get; set; }
+    public decimal? TotalAmount { get; set; }
+}
+```
+</CodeGroup>
+
+### 3. Implement the Endpoint
+
+Create an endpoint that implements `IEndpoint` from the Common building block.
+
+```csharp MyFeatureEndpoint.cs
+using Common.Endpoints;
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Trips.Api.Features.MyFeature;
+
+public sealed class MyFeatureEndpoint : IEndpoint
+{
+    public static void Map(IEndpointRouteBuilder app)
+    {
+        app.MapPost("/api/trips/{tripId}/my-feature", async (
+            string tripId,
+            [FromBody] MyFeatureRequest request,
+            [FromServices] IMediator mediator,
+            CancellationToken cancellationToken) =>
+        {
+            // Map route parameters to request
+            request.TripId = tripId;
+
+            // Create command
+            var command = new MyFeatureCommand
+            {
+                TripId = request.TripId,
+                UserId = request.UserId,
+                Count = request.Count
+            };
+
+            try
+            {
+                // Execute via MediatR
+                MyFeatureResponse result = await mediator.Send(
+                    command, cancellationToken);
+                
+                return result.Success 
+                    ? Results.Ok(result) 
+                    : Results.BadRequest(result);
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new MyFeatureResponse
+                {
+                    Success = false,
+                    Message = $"Error: {ex.Message}"
+                });
+            }
+        })
+        .WithName("MyFeature")
+        .WithOpenApi()
+        .Produces<MyFeatureResponse>(StatusCodes.Status200OK)
+        .Produces<MyFeatureResponse>(StatusCodes.Status400BadRequest)
+        .WithTags("My Feature")
+        .RequireAuthorization(Policies.Passenger);  // Or .AllowAnonymous()
+    }
+}
+```
+
+<Tip>
+**Endpoint Registration:** Endpoints implementing `IEndpoint` are automatically discovered and registered via reflection. No manual registration needed!
+</Tip>
+
+### 4. Implement the Handler
+
+Create a MediatR handler containing the business logic.
+
+```csharp MyFeatureHandler.cs
+using MediatR;
+using Trips.Api.Infrastructure.Data;
+using Trips.Api.Features.Ports;
+using LinqToDB;
+using Wolverine;
+
+namespace Trips.Api.Features.MyFeature;
+
+public class MyFeatureCommand : IRequest<MyFeatureResponse>
+{
+    public string TripId { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public int Count { get; set; }
+}
+
+public class MyFeatureHandler(
+    ITripRepository tripRepository,
+    IUsersApiService usersApiService,
+    ILogger<MyFeatureHandler> logger,
+    IMessageBus messageBus,
+    AppDataConnection db)
+    : IRequestHandler<MyFeatureCommand, MyFeatureResponse>
+{
+    public async Task<MyFeatureResponse> Handle(
+        MyFeatureCommand request, 
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation(
+            "Processing MyFeature for trip {TripId}, user {UserId}",
+            request.TripId, request.UserId);
+
+        try
+        {
+            // 1. Validate inputs
+            Trip trip = await tripRepository.GetAsync(
+                request.TripId, cancellationToken)
+                ?? throw new ArgumentException("Trip not found");
+
+            if (trip.Status != TripStatuses.Scheduled)
+            {
+                throw new InvalidOperationException(
+                    "Trip is not in scheduled status");
+            }
+
+            // 2. Perform business logic
+            string resourceId = Guid.NewGuid().ToString();
+            decimal totalAmount = trip.Price * request.Count;
+
+            // 3. Persist data (with transaction if needed)
+            using (var transaction = await db.BeginTransactionAsync(cancellationToken))
+            {
+                try
+                {
+                    // Database operations here
+                    await db.GetTable<MyResource>()
+                        .InsertAsync(() => new MyResource
+                        {
+                            Id = resourceId,
+                            TripId = request.TripId,
+                            UserId = request.UserId,
+                            Count = request.Count,
+                            Amount = totalAmount,
+                            CreatedAtUtc = DateTimeOffset.UtcNow
+                        }, token: cancellationToken);
+
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+
+            // 4. Publish events (after transaction commits)
+            var notification = new MyFeatureCompletedNotification(
+                resourceId, request.TripId, request.UserId);
+            await messageBus.PublishAsync(notification);
+
+            logger.LogInformation(
+                "MyFeature completed successfully for trip {TripId}",
+                request.TripId);
+
+            return new MyFeatureResponse
+            {
+                Success = true,
+                Message = "Feature executed successfully",
+                ResourceId = resourceId,
+                TotalAmount = totalAmount
+            };
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning("Business logic error: {Error}", ex.Message);
+            return new MyFeatureResponse
+            {
+                Success = false,
+                Message = ex.Message
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error processing MyFeature");
+            return new MyFeatureResponse
+            {
+                Success = false,
+                Message = "An error occurred processing your request"
+            };
+        }
+    }
+}
+```
+
+### 5. Add Validation (Optional)
+
+Create a FluentValidation validator for complex validation rules.
+
+```csharp MyFeatureValidator.cs
+using FluentValidation;
+
+namespace Trips.Api.Features.MyFeature;
+
+public class MyFeatureValidator : AbstractValidator<MyFeatureRequest>
+{
+    public MyFeatureValidator()
+    {
+        RuleFor(x => x.TripId)
+            .NotEmpty()
+            .WithMessage("Trip ID is required");
+
+        RuleFor(x => x.UserId)
+            .NotEmpty()
+            .WithMessage("User ID is required");
+
+        RuleFor(x => x.Count)
+            .GreaterThan(0)
+            .WithMessage("Count must be greater than 0")
+            .LessThanOrEqualTo(100)
+            .WithMessage("Count cannot exceed 100");
+    }
+}
+```
+
+**Enable validation in Program.cs:**
+```csharp
+builder.Services.AddValidatorsFromAssemblyContaining(typeof(Program));
+```
+
+### 6. Register Dependencies
+
+If your feature requires new services, register them in `Program.cs`.
+
+```csharp Program.cs
+// Register repositories
+builder.Services.AddScoped<IMyFeatureRepository, MyFeatureRepository>();
+
+// Register services
+builder.Services.AddScoped<IMyFeatureService, MyFeatureService>();
+```
+
+### 7. Add Tests
+
+Create integration tests for your feature.
+
+```csharp MyFeatureTests.cs
+public class MyFeatureTests : IClassFixture<WebApplicationFactory<Program>>
+{
+    private readonly HttpClient _client;
+
+    public MyFeatureTests(WebApplicationFactory<Program> factory)
+    {
+        _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task MyFeature_WithValidRequest_ReturnsSuccess()
+    {
+        // Arrange
+        var request = new MyFeatureRequest
+        {
+            TripId = "trip-123",
+            UserId = "user-456",
+            Count = 5
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            "/api/trips/trip-123/my-feature", request);
+
+        // Assert
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content
+            .ReadFromJsonAsync<MyFeatureResponse>();
+        Assert.NotNull(result);
+        Assert.True(result.Success);
+    }
+}
+```
+
+## Real-World Example: BookSeat Feature
+
+Let's examine the actual `BookSeat` feature from the Trips service.
+
+### Endpoint (Excerpt)
+
+```csharp BookSeatEndpoint.cs:1-65
+using Common.Endpoints;
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+
+public sealed class BookSeatEndpoint : IEndpoint
+{
+    public static void Map(IEndpointRouteBuilder app)
+    {
+        app.MapPost("/api/trips/{tripId}/book-seat", async (
+            string tripId,
+            [FromBody] BookSeatRequest request,
+            [FromServices] IMediator mediator,
+            CancellationToken cancellationToken) =>
+        {
+            request.TripId = tripId;
+
+            var command = new BookSeatCommand
+            {
+                TripId = request.TripId,
+                PassengerId = request.PassengerId,
+                RequestedSeatsCount = request.RequestedSeatsCount,
+                PaymentMethod = request.PaymentMethod ?? PaymentMethods.Cash,
+                BankTransferData = request.BankTransferData != null 
+                    ? new BankTransferDataCommand
+                    {
+                        BankAccountId = request.BankTransferData.BankAccountId,
+                        Note = request.BankTransferData.Note,
+                        ReceiptImageUrl = null
+                    } 
+                    : null
+            };
+
+            try
+            {
+                BookSeatResponse result = await mediator.Send(
+                    command, cancellationToken);
+                
+                return result.Success 
+                    ? Results.Ok(result) 
+                    : Results.BadRequest(result);
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new BookSeatResponse
+                {
+                    Success = false,
+                    Message = $"Error: {ex.Message}"
+                });
+            }
+        })
+        .WithName("BookSeat")
+        .WithOpenApi()
+        .Produces<BookSeatResponse>(StatusCodes.Status200OK)
+        .Produces<BookSeatResponse>(StatusCodes.Status400BadRequest)
+        .WithTags("Seat Booking")
+        .WithSummary("Book seat(s) for a trip")
+        .AllowAnonymous();
+    }
+}
+```
+
+### Handler Pattern (Excerpt)
+
+```csharp BookSeatHandler.cs:46-102
+public async Task<BookSeatResponse> Handle(
+    BookSeatCommand request, 
+    CancellationToken cancellationToken)
+{
+    logger.LogInformation(
+        "Starting seat booking for trip: {TripId}, passenger: {PassengerId}",
+        request.TripId, request.PassengerId);
+
+    try
+    {
+        // 1. Fetch and validate trip
+        Trip trip = await tripRepository.GetAsync(
+            request.TripId, cancellationToken)
+            ?? throw new ArgumentException("Trip not found");
+
+        if (trip.Status != TripStatuses.Scheduled)
+        {
+            throw new InvalidOperationException(
+                "Cannot book seat for non-scheduled trip");
+        }
+
+        // 2. Validate seat availability
+        int availableForBooking = Math.Max(0, 
+            trip.AvailableSeatCount - trip.ReservedSeatCount);
+            
+        if (availableForBooking < request.RequestedSeatsCount)
+        {
+            throw new InvalidOperationException(
+                "Not enough available seats");
+        }
+
+        // 3. Validate payment method
+        string paymentMethod = request.PaymentMethod ?? PaymentMethods.Cash;
+        decimal totalPrice = trip.Price * request.RequestedSeatsCount;
+        
+        BookingPaymentValidator.ValidatePaymentMethod(paymentMethod);
+
+        // 4. Get passenger info
+        PassengerBasicInfo passenger = 
+            await usersApiService.GetPassengerAsync(
+                request.PassengerId, cancellationToken)
+            ?? throw new InvalidOperationException("Passenger not found");
+
+        // 5. Create booking in transaction
+        string bookingId = Guid.NewGuid().ToString();
+        
+        using (var transaction = await db.BeginTransactionAsync(cancellationToken))
+        {
+            // ... database operations
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        // 6. Publish notifications
+        await messageBus.PublishAsync(new BookingCreatedNotification(...));
+
+        return new BookSeatResponse
+        {
+            Success = true,
+            Message = "Booking request sent successfully",
+            BookingId = bookingId,
+            TotalPrice = totalPrice
+        };
+    }
+    catch (InvalidOperationException ex)
+    {
+        return new BookSeatResponse { Success = false, Message = ex.Message };
+    }
+}
+```
+
+## Architectural Patterns
+
+### Minimal APIs + MediatR
+
+Endpoints are thin HTTP wrappers that delegate to MediatR handlers.
+
+<Check>**Benefits:**</Check>
+- Clean separation of HTTP concerns from business logic
+- Testable handlers without HTTP dependencies
+- Pipeline behaviors (logging, validation, transactions)
+
+### Repository Pattern
+
+Data access is abstracted behind repository interfaces.
+
+```csharp
+public interface ITripRepository
+{
+    Task<Trip?> GetAsync(string id, CancellationToken ct);
+    Task AddAsync(Trip trip, CancellationToken ct);
+    Task UpdateAsync(Trip trip, CancellationToken ct);
+}
+```
+
+### Service Pattern
+
+Complex operations are encapsulated in service classes.
+
+```csharp
+public interface IUsersApiService
+{
+    Task<PassengerBasicInfo?> GetPassengerAsync(
+        string passengerId, CancellationToken ct);
+    Task<DriverBasicInfo?> GetDriverAsync(
+        string driverId, CancellationToken ct);
+    Task<string> UploadFileAsync(
+        Stream stream, string fileName, string contentType, 
+        string subfolder, CancellationToken ct);
+}
+```
+
+## Common Patterns
+
+### Database Transactions
+
+```csharp
+using (var transaction = await db.BeginTransactionAsync(cancellationToken))
+{
+    try
+    {
+        // Multiple operations
+        await repository1.SaveAsync(...);
+        await repository2.SaveAsync(...);
+        
+        await transaction.CommitAsync(cancellationToken);
+    }
+    catch
+    {
+        await transaction.RollbackAsync(cancellationToken);
+        throw;
+    }
+}
+```
+
+### Publishing Events
+
+```csharp
+// After successful database commit
+var notification = new SomethingHappenedNotification(
+    entityId, userId, timestamp);
+    
+await messageBus.PublishAsync(notification);
+```
+
+### Error Handling
+
+```csharp
+try
+{
+    // Business logic
+    return new SuccessResponse { ... };
+}
+catch (InvalidOperationException ex)  // Expected business errors
+{
+    logger.LogWarning("Business error: {Error}", ex.Message);
+    return new ErrorResponse { Success = false, Message = ex.Message };
+}
+catch (Exception ex)  // Unexpected errors
+{
+    logger.LogError(ex, "Unexpected error");
+    return new ErrorResponse 
+    { 
+        Success = false, 
+        Message = "An unexpected error occurred" 
+    };
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep Features Independent">
+    Each feature should be self-contained. Avoid tight coupling between features.
+  </Accordion>
+  
+  <Accordion title="Use Strong Types">
+    Avoid primitive obsession. Use domain types like `TripId`, `UserId`, `Money` instead of strings and decimals.
+  </Accordion>
+  
+  <Accordion title="Validate Early">
+    Validate inputs at the beginning of handlers before executing business logic.
+  </Accordion>
+  
+  <Accordion title="Log Structured Data">
+    Use structured logging with semantic properties, not string interpolation.
+    ```csharp
+    // Good
+    logger.LogInformation("Booking {BookingId} created for trip {TripId}", 
+        bookingId, tripId);
+    
+    // Bad
+    logger.LogInformation($"Booking {bookingId} created for trip {tripId}");
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle Cancellation">
+    Pass `CancellationToken` through all async operations to support request cancellation.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building Blocks" icon="layer-group" href="/development/building-blocks">
+    Learn about shared infrastructure components
+  </Card>
+  <Card title="Database Migrations" icon="database" href="/development/database-migrations">
+    Add database schema changes for your feature
+  </Card>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Write tests for your new feature
+  </Card>
+</CardGroup>

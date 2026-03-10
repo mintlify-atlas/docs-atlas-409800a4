@@ -1,0 +1,441 @@
+---
+title: 'Admin Reports'
+description: 'Administrative reporting endpoints for trip ledgers, financial traces, and overview analytics'
+---
+
+## Overview
+
+Admin reporting APIs provide comprehensive insights into trip financials, booking history, and platform analytics. All endpoints require `AdminPolicy` authorization.
+
+## Reports Overview
+
+Get aggregated reports with statistics, top lists, and activity charts.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/reports/overview?dateFrom=2024-01-01&dateTo=2024-12-31" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="dateFrom" type="string" optional>
+  Start date (ISO 8601 format). Defaults to first day of current month
+</ParamField>
+
+<ParamField query="dateTo" type="string" optional>
+  End date (ISO 8601 format). Defaults to first day of next month
+</ParamField>
+
+<ParamField query="sections" type="string" optional>
+  Comma-separated list of sections to include: `stats`, `topRoutes`, `topCompanies`, `topDrivers`, `tripActivity`, `userRegistrations`. Omit to get all sections.
+</ParamField>
+
+### Response
+
+<ResponseField name="stats" type="object">
+  Platform statistics
+  <expandable>
+    <ResponseField name="profitByCurrency" type="array">
+      Platform profit grouped by currency
+      <expandable>
+        <ResponseField name="currency" type="string">
+          Currency code (SAR, USD, EGP)
+        </ResponseField>
+        <ResponseField name="totalProfit" type="number">
+          Total profit in this currency
+        </ResponseField>
+      </expandable>
+    </ResponseField>
+    <ResponseField name="completedTrips" type="integer">
+      Number of completed trips
+    </ResponseField>
+    <ResponseField name="totalTrips" type="integer">
+      Total number of trips (all statuses)
+    </ResponseField>
+    <ResponseField name="totalClients" type="integer">
+      Total registered passengers
+    </ResponseField>
+    <ResponseField name="totalCompanies" type="integer">
+      Total registered companies
+    </ResponseField>
+    <ResponseField name="totalDrivers" type="integer">
+      Total registered drivers
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="topRoutes" type="array">
+  Top 6 routes by booking count
+  <expandable>
+    <ResponseField name="rank" type="integer">
+      Route ranking (1-6)
+    </ResponseField>
+    <ResponseField name="route" type="string">
+      Route name (e.g., "Riyadh - Jeddah")
+    </ResponseField>
+    <ResponseField name="bookingCount" type="integer">
+      Number of bookings on this route
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="topCompanies" type="array">
+  Top 6 companies by booking count
+  <expandable>
+    <ResponseField name="rank" type="integer">
+      Company ranking (1-6)
+    </ResponseField>
+    <ResponseField name="companyId" type="string">
+      Company identifier
+    </ResponseField>
+    <ResponseField name="companyName" type="string">
+      Company name
+    </ResponseField>
+    <ResponseField name="logoUrl" type="string">
+      Company logo URL
+    </ResponseField>
+    <ResponseField name="bookingCount" type="integer">
+      Number of bookings
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="topDrivers" type="array">
+  Top 6 drivers by booking count
+  <expandable>
+    <ResponseField name="rank" type="integer">
+      Driver ranking (1-6)
+    </ResponseField>
+    <ResponseField name="driverId" type="string">
+      Driver identifier
+    </ResponseField>
+    <ResponseField name="driverName" type="string">
+      Driver full name
+    </ResponseField>
+    <ResponseField name="profileImageUrl" type="string">
+      Driver profile image URL
+    </ResponseField>
+    <ResponseField name="bookingCount" type="integer">
+      Number of bookings
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="tripActivity" type="array">
+  Monthly trip activity chart data
+  <expandable>
+    <ResponseField name="month" type="integer">
+      Month number (1-12)
+    </ResponseField>
+    <ResponseField name="label" type="string">
+      Month name in Arabic (e.g., "يناير")
+    </ResponseField>
+    <ResponseField name="count" type="integer">
+      Number of trips created in this month
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="userRegistrations" type="array">
+  Monthly user registration chart data
+  <expandable>
+    <ResponseField name="month" type="integer">
+      Month number (1-12)
+    </ResponseField>
+    <ResponseField name="label" type="string">
+      Month name in Arabic
+    </ResponseField>
+    <ResponseField name="count" type="integer">
+      Number of users registered in this month
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<Note>
+The overview report aggregates data from individual trips, company trips, and company public trips. Profit calculations include commission amounts from confirmed and completed bookings.
+</Note>
+
+---
+
+## Trip Ledger
+
+Get detailed financial ledger for a specific trip, including all bookings and revenue breakdown.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/reports/trip-ledger?tripId=trip_abc123" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="tripId" type="string" required>
+  Trip identifier (supports driver trips, company trips, and public trips)
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Trip ledger data
+  <expandable>
+    <ResponseField name="tripId" type="string">
+      Trip identifier
+    </ResponseField>
+    <ResponseField name="tripType" type="string">
+      Trip type: `driver`, `company`, or `public`
+    </ResponseField>
+    <ResponseField name="currency" type="string">
+      Trip currency code
+    </ResponseField>
+    <ResponseField name="summary" type="object">
+      Financial summary
+      <expandable>
+        <ResponseField name="totalRevenue" type="number">
+          Total revenue from all bookings
+        </ResponseField>
+        <ResponseField name="totalCommission" type="number">
+          Total platform commission
+        </ResponseField>
+        <ResponseField name="netEarnings" type="number">
+          Net earnings (revenue - commission)
+        </ResponseField>
+        <ResponseField name="cashPayments" type="number">
+          Total cash payments
+        </ResponseField>
+        <ResponseField name="walletPayments" type="number">
+          Total wallet payments
+        </ResponseField>
+        <ResponseField name="moyasarPayments" type="number">
+          Total online payments (Moyasar)
+        </ResponseField>
+        <ResponseField name="bankTransferPayments" type="number">
+          Total bank transfer payments
+        </ResponseField>
+        <ResponseField name="commissionDeducted" type="boolean">
+          Whether commission has been deducted from wallets
+        </ResponseField>
+        <ResponseField name="totalBookings" type="integer">
+          Total number of bookings
+        </ResponseField>
+        <ResponseField name="completedBookings" type="integer">
+          Number of completed bookings
+        </ResponseField>
+        <ResponseField name="cancelledBookings" type="integer">
+          Number of cancelled bookings
+        </ResponseField>
+      </expandable>
+    </ResponseField>
+    <ResponseField name="bookings" type="array">
+      Detailed booking information
+      <expandable>
+        <ResponseField name="bookingId" type="string">
+          Booking identifier
+        </ResponseField>
+        <ResponseField name="bookingNumber" type="string">
+          Human-readable booking number
+        </ResponseField>
+        <ResponseField name="passengerName" type="string">
+          Passenger name
+        </ResponseField>
+        <ResponseField name="passengerPhone" type="string">
+          Passenger phone number
+        </ResponseField>
+        <ResponseField name="seatsCount" type="integer">
+          Number of seats booked
+        </ResponseField>
+        <ResponseField name="totalPrice" type="number">
+          Total booking price
+        </ResponseField>
+        <ResponseField name="commissionAmount" type="number">
+          Commission charged
+        </ResponseField>
+        <ResponseField name="earnings" type="number">
+          Driver/company earnings
+        </ResponseField>
+        <ResponseField name="paymentMethod" type="string">
+          Payment method used
+        </ResponseField>
+        <ResponseField name="status" type="string">
+          Booking status
+        </ResponseField>
+        <ResponseField name="currency" type="string">
+          Booking currency
+        </ResponseField>
+        <ResponseField name="createdAt" type="string">
+          Booking creation timestamp
+        </ResponseField>
+      </expandable>
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+---
+
+## Trip Trace
+
+Smart trace search that accepts trip ID, booking ID, or booking number and returns complete financial history with wallet transactions.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagle.com/api/admin/reports/trip-trace?searchTerm=BK12345" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="searchTerm" type="string" required>
+  Trip ID, booking ID, or booking number (with or without # prefix)
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Operation status
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Trace data
+  <expandable>
+    <ResponseField name="tripInfo" type="object">
+      Trip information
+      <expandable>
+        <ResponseField name="tripId" type="string">
+          Trip identifier
+        </ResponseField>
+        <ResponseField name="tripType" type="string">
+          Trip type: `driver`, `company`, or `public`
+        </ResponseField>
+        <ResponseField name="from" type="string">
+          Origin city
+        </ResponseField>
+        <ResponseField name="to" type="string">
+          Destination city
+        </ResponseField>
+        <ResponseField name="price" type="number">
+          Trip price
+        </ResponseField>
+        <ResponseField name="currency" type="string">
+          Currency code
+        </ResponseField>
+        <ResponseField name="status" type="string">
+          Trip status
+        </ResponseField>
+        <ResponseField name="departureTime" type="string">
+          Departure timestamp
+        </ResponseField>
+        <ResponseField name="completedAt" type="string">
+          Completion timestamp
+        </ResponseField>
+        <ResponseField name="driverName" type="string">
+          Driver name
+        </ResponseField>
+        <ResponseField name="driverId" type="string">
+          Driver identifier
+        </ResponseField>
+        <ResponseField name="companyName" type="string">
+          Company name (if applicable)
+        </ResponseField>
+        <ResponseField name="companyId" type="string">
+          Company identifier (if applicable)
+        </ResponseField>
+        <ResponseField name="totalSeats" type="integer">
+          Total available seats
+        </ResponseField>
+        <ResponseField name="reservedSeats" type="integer">
+          Number of reserved seats
+        </ResponseField>
+      </expandable>
+    </ResponseField>
+    <ResponseField name="bookings" type="array">
+      Array of booking information (same structure as trip ledger)
+    </ResponseField>
+    <ResponseField name="timeline" type="array">
+      Financial transaction timeline
+      <expandable>
+        <ResponseField name="id" type="string">
+          Transaction identifier
+        </ResponseField>
+        <ResponseField name="timestamp" type="string">
+          Transaction timestamp
+        </ResponseField>
+        <ResponseField name="transactionType" type="string">
+          Type: `Deduct`, `Credit`, `Deposit`, `Withdraw`
+        </ResponseField>
+        <ResponseField name="description" type="string">
+          Transaction description
+        </ResponseField>
+        <ResponseField name="amount" type="number">
+          Transaction amount
+        </ResponseField>
+        <ResponseField name="balanceBefore" type="number">
+          Balance before transaction
+        </ResponseField>
+        <ResponseField name="balanceAfter" type="number">
+          Balance after transaction
+        </ResponseField>
+        <ResponseField name="walletOwner" type="string">
+          Name of wallet owner
+        </ResponseField>
+        <ResponseField name="walletType" type="string">
+          Wallet type: `Driver`, `Passenger`, `Company`
+        </ResponseField>
+        <ResponseField name="referenceType" type="string">
+          Reference type (e.g., Booking, Trip)
+        </ResponseField>
+        <ResponseField name="referenceId" type="string">
+          Reference identifier
+        </ResponseField>
+      </expandable>
+    </ResponseField>
+    <ResponseField name="summary" type="object">
+      Financial summary (same structure as trip ledger)
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<Note>
+Trip trace provides complete financial visibility by:
+- Automatically detecting trip type from any search term
+- Including all wallet transactions related to the trip and its bookings
+- Resolving user names for better readability
+- Showing chronological transaction timeline
+</Note>
+
+---
+
+## Use Cases
+
+### Monthly Performance Report
+
+```bash
+curl -X GET "https://api.masareagle.com/api/admin/reports/overview?dateFrom=2024-03-01&dateTo=2024-03-31" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+Get a complete monthly report with revenue, top performers, and user growth.
+
+### Trip Financial Audit
+
+```bash
+curl -X GET "https://api.masareagle.com/api/admin/reports/trip-ledger?tripId=trip_xyz" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+Audit all bookings and revenue for a specific trip.
+
+### Customer Support Inquiry
+
+```bash
+curl -X GET "https://api.masareagle.com/api/admin/reports/trip-trace?searchTerm=BK12345" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+Quickly look up a booking by its number and see complete transaction history.

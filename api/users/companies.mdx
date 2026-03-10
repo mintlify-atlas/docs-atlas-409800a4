@@ -1,0 +1,571 @@
+---
+title: 'Companies'
+description: 'Manage company profiles, credentials, and business information in Masar Eagle'
+icon: 'building'
+---
+
+## Overview
+
+The Companies API provides endpoints for managing company profiles, credentials, drivers, vehicles, and public information. Companies can manage their own profiles while admins have full access to all company operations.
+
+## Authentication
+
+Most endpoints require authentication. Include the JWT token in the Authorization header:
+
+```bash
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+---
+
+## Get Company Profile
+
+<api-endpoint method="GET" endpoint="/api/company/profile" />
+
+Get the current authenticated company's profile information. **Company role required**.
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Company unique identifier
+</ResponseField>
+
+<ResponseField name="Email" type="string">
+  Company email address
+</ResponseField>
+
+<ResponseField name="Name" type="string" nullable>
+  Company name
+</ResponseField>
+
+<ResponseField name="PhoneNumber" type="string" nullable>
+  Company phone number
+</ResponseField>
+
+<ResponseField name="LogoUrl" type="string" nullable>
+  URL to company logo
+</ResponseField>
+
+<ResponseField name="Address" type="string" nullable>
+  Company physical address
+</ResponseField>
+
+<ResponseField name="CommercialRegistrationNumber" type="string" nullable>
+  Commercial registration number
+</ResponseField>
+
+<ResponseField name="IsActive" type="boolean">
+  Whether company account is active
+</ResponseField>
+
+<ResponseField name="IsProfileComplete" type="boolean">
+  Whether profile is complete (requires Name and PhoneNumber)
+</ResponseField>
+
+<ResponseField name="LastLoginAt" type="datetime" nullable>
+  Last login timestamp
+</ResponseField>
+
+<ResponseField name="CreatedAt" type="datetime">
+  Account creation timestamp
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/company/profile" \
+  -H "Authorization: Bearer YOUR_COMPANY_JWT_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "Id": "c_345678",
+  "Email": "info@transportco.com",
+  "Name": "شركة النقل المتطور",
+  "PhoneNumber": "+966112345678",
+  "LogoUrl": "/uploads/companies/c_345678/logo.png",
+  "Address": "الرياض، شارع الملك فهد",
+  "CommercialRegistrationNumber": "1234567890",
+  "IsActive": true,
+  "IsProfileComplete": true,
+  "LastLoginAt": "2024-03-10T10:00:00Z",
+  "CreatedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+## Update Company Profile
+
+<api-endpoint method="PUT" endpoint="/api/company/profile" />
+
+Update company profile information. **Company role required**.
+
+### Request Body
+
+<ParamField body="Name" type="string" optional>
+  Company name (max 200 characters)
+</ParamField>
+
+<ParamField body="PhoneNumber" type="string" optional>
+  Company phone number (digits, spaces, +, -, () allowed)
+</ParamField>
+
+<ParamField body="Address" type="string" optional>
+  Company address (max 500 characters)
+</ParamField>
+
+<ParamField body="CommercialRegistrationNumber" type="string" optional>
+  Commercial registration number (max 50 characters)
+</ParamField>
+
+### Response
+
+Returns the same structure as Get Company Profile with updated values.
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/company/profile" \
+  -H "Authorization: Bearer YOUR_COMPANY_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "شركة النقل المتطور للنقل",
+    "PhoneNumber": "+966112345678",
+    "Address": "الرياض، المملكة العربية السعودية",
+    "CommercialRegistrationNumber": "1234567890"
+  }'
+```
+
+---
+
+## Get Company Public Info
+
+<api-endpoint method="GET" endpoint="/api/companies/{companyId}/public" />
+
+Get basic public information about a company. **No authentication required**.
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company unique identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Company ID
+</ResponseField>
+
+<ResponseField name="Name" type="string">
+  Company name
+</ResponseField>
+
+<ResponseField name="LogoUrl" type="string" nullable>
+  URL to company logo
+</ResponseField>
+
+<ResponseField name="OverallRating" type="decimal">
+  Average rating from reviews
+</ResponseField>
+
+<ResponseField name="TotalReviewsCount" type="integer">
+  Total number of reviews
+</ResponseField>
+
+<ResponseField name="IsActive" type="boolean">
+  Active status
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/companies/c_345678/public"
+```
+
+### Example Response
+
+```json
+{
+  "Id": "c_345678",
+  "Name": "شركة النقل المتطور",
+  "LogoUrl": "/uploads/companies/c_345678/logo.png",
+  "OverallRating": 4.7,
+  "TotalReviewsCount": 125,
+  "IsActive": true
+}
+```
+
+---
+
+## Upload Company Logo
+
+<api-endpoint method="POST" endpoint="/api/company/logo" />
+
+Upload or update company logo. **Company role required**.
+
+### Request Body (Form Data)
+
+<ParamField body="Logo" type="file" required>
+  Image file (JPEG, PNG, WebP - max 5MB, recommended: 512x512px)
+</ParamField>
+
+### Response
+
+<ResponseField name="LogoUrl" type="string">
+  URL to the uploaded logo
+</ResponseField>
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/company/logo" \
+  -H "Authorization: Bearer YOUR_COMPANY_JWT_TOKEN" \
+  -F "Logo=@company-logo.png"
+```
+
+---
+
+## Delete Company Logo
+
+<api-endpoint method="DELETE" endpoint="/api/company/logo" />
+
+Delete company logo. **Company role required**.
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/company/logo" \
+  -H "Authorization: Bearer YOUR_COMPANY_JWT_TOKEN"
+```
+
+---
+
+## Update Company Credentials
+
+<api-endpoint method="PUT" endpoint="/api/company/credentials" />
+
+Update company email and/or password. **Company role required**.
+
+### Request Body
+
+<ParamField body="Email" type="string" optional>
+  New email address (valid email format)
+</ParamField>
+
+<ParamField body="CurrentPassword" type="string" required>
+  Current password for verification
+</ParamField>
+
+<ParamField body="NewPassword" type="string" optional>
+  New password (min 8 characters, requires uppercase, lowercase, digit, special char)
+</ParamField>
+
+### Response
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="Email" type="string">
+  Updated email address
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/company/credentials" \
+  -H "Authorization: Bearer YOUR_COMPANY_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Email": "newemail@transportco.com",
+    "CurrentPassword": "OldPassword123!",
+    "NewPassword": "NewSecurePass456!"
+  }'
+```
+
+---
+
+## List Company Drivers
+
+<api-endpoint method="GET" endpoint="/api/companies/{companyId}/drivers" />
+
+Get all drivers associated with a company.
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company unique identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Items per page
+</ParamField>
+
+<ParamField query="IsActive" type="boolean" optional>
+  Filter by active status
+</ParamField>
+
+### Response
+
+<ResponseField name="Drivers" type="array">
+  List of company drivers
+</ResponseField>
+
+<ResponseField name="TotalCount" type="integer">
+  Total number of drivers
+</ResponseField>
+
+<ResponseField name="Page" type="integer">
+  Current page
+</ResponseField>
+
+<ResponseField name="PageSize" type="integer">
+  Items per page
+</ResponseField>
+
+<ResponseField name="TotalPages" type="integer">
+  Total pages
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/companies/c_345678/drivers?Page=1&PageSize=20" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## List Company Vehicles
+
+<api-endpoint method="GET" endpoint="/api/companies/{companyId}/vehicles" />
+
+Get all vehicles associated with a company.
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company unique identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Items per page
+</ParamField>
+
+<ParamField query="VehicleTypeId" type="string" optional>
+  Filter by vehicle type
+</ParamField>
+
+### Response
+
+<ResponseField name="Vehicles" type="array">
+  List of company vehicles
+</ResponseField>
+
+<ResponseField name="TotalCount" type="integer">
+  Total number of vehicles
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/companies/c_345678/vehicles" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Admin: List All Companies
+
+<api-endpoint method="GET" endpoint="/api/admin/companies" />
+
+Retrieve a paginated list of all companies. **Admin only**.
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Items per page
+</ParamField>
+
+<ParamField query="SearchTerm" type="string" optional>
+  Search by name, email, or commercial registration number
+</ParamField>
+
+<ParamField query="IsActive" type="boolean" optional>
+  Filter by active status
+</ParamField>
+
+<ParamField query="IsProfileComplete" type="boolean" optional>
+  Filter by profile completion
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/companies?Page=1&IsActive=true" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Admin: Get Company by ID
+
+<api-endpoint method="GET" endpoint="/api/admin/companies/{companyId}" />
+
+Get detailed company information. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company unique identifier
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/companies/c_345678" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Admin: Create Company
+
+<api-endpoint method="POST" endpoint="/api/admin/companies" />
+
+Create a new company account. **Admin only**.
+
+### Request Body
+
+<ParamField body="Email" type="string" required>
+  Company email address
+</ParamField>
+
+<ParamField body="Password" type="string" required>
+  Initial password
+</ParamField>
+
+<ParamField body="Name" type="string" optional>
+  Company name
+</ParamField>
+
+<ParamField body="PhoneNumber" type="string" optional>
+  Company phone number
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/admin/companies" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Email": "newcompany@example.com",
+    "Password": "SecurePass123!",
+    "Name": "شركة جديدة",
+    "PhoneNumber": "+966501234567"
+  }'
+```
+
+---
+
+## Admin: Update Company
+
+<api-endpoint method="PUT" endpoint="/api/admin/companies/{companyId}" />
+
+Update company information. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company unique identifier
+</ParamField>
+
+### Request Body
+
+Same as Update Company Profile, plus:
+
+<ParamField body="IsActive" type="boolean" optional>
+  Set company active status
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/admin/companies/c_345678" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "شركة محدثة",
+    "IsActive": true
+  }'
+```
+
+---
+
+## Admin: Delete Company
+
+<api-endpoint method="DELETE" endpoint="/api/admin/companies/{companyId}" />
+
+Soft delete a company account. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="companyId" type="string" required>
+  Company unique identifier
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/admin/companies/c_345678" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Error Responses
+
+All endpoints may return the following error responses:
+
+### Common Error Codes
+
+- `400 Bad Request` - Invalid request or validation errors
+- `401 Unauthorized` - Missing or invalid authentication
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Company not found
+- `500 Internal Server Error` - Server error
+
+### Example Error Response
+
+```json
+{
+  "error": "فشل التحقق من البيانات",
+  "details": [
+    "اسم الشركة يجب أن لا يتجاوز 200 حرف"
+  ]
+}
+```

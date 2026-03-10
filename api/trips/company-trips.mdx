@@ -1,0 +1,599 @@
+---
+title: 'Company Trip Management'
+description: 'Company-specific trip and public trip endpoints'
+---
+
+## Overview
+
+Company trips come in two types:
+1. **Trip Routes** - Template routes that can be booked multiple times
+2. **Public Trips** - Scheduled trips with assigned driver/vehicle where passengers book individual seats
+
+---
+
+## Get Company Trip Details
+
+Retrieve detailed information about a specific company trip route.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagles.com/api/companies/{companyId}/trips/{tripId}" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  GET
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/companies/{companyId}/trips/{tripId}`
+</ParamField>
+
+<ParamField path="companyId" type="string" required>
+  Company identifier
+</ParamField>
+
+<ParamField path="tripId" type="string" required>
+  Trip route identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Trip route identifier
+</ResponseField>
+
+<ResponseField name="companyId" type="string">
+  Company identifier
+</ResponseField>
+
+<ResponseField name="fromCity" type="string">
+  Origin city name
+</ResponseField>
+
+<ResponseField name="toCity" type="string">
+  Destination city name
+</ResponseField>
+
+<ResponseField name="fromLatitude" type="decimal">
+  Origin latitude
+</ResponseField>
+
+<ResponseField name="fromLongitude" type="decimal">
+  Origin longitude
+</ResponseField>
+
+<ResponseField name="toLatitude" type="decimal">
+  Destination latitude
+</ResponseField>
+
+<ResponseField name="toLongitude" type="decimal">
+  Destination longitude
+</ResponseField>
+
+<ResponseField name="availabilityCount" type="integer">
+  Total number of times this route can be booked
+</ResponseField>
+
+<ResponseField name="currentBookings" type="integer">
+  Number of active bookings
+</ResponseField>
+
+<ResponseField name="remainingAvailability" type="integer">
+  Remaining booking slots
+</ResponseField>
+
+<ResponseField name="isAvailableForBooking" type="boolean">
+  Whether route is currently bookable
+</ResponseField>
+
+<ResponseField name="price" type="decimal">
+  Trip price
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  Currency code
+</ResponseField>
+
+<ResponseField name="vehicleTypeId" type="string">
+  Vehicle type identifier
+</ResponseField>
+
+<ResponseField name="assignedDriverId" type="string">
+  Assigned driver ID (if any)
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Trip route status
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether route is active
+</ResponseField>
+
+<ResponseField name="availabilityDate" type="string">
+  Date route becomes available
+</ResponseField>
+
+<ResponseExample>
+```json Success Response
+{
+  "id": "comptrip_abc123",
+  "companyId": "comp_xyz789",
+  "fromCityId": "city_riyadh",
+  "fromCity": "Riyadh",
+  "fromLatitude": 24.7136,
+  "fromLongitude": 46.6753,
+  "fromAddress": "King Khalid International Airport",
+  "toCityId": "city_jeddah",
+  "toCity": "Jeddah",
+  "toLatitude": 21.5433,
+  "toLongitude": 39.1728,
+  "toAddress": "King Abdulaziz International Airport",
+  "availabilityCount": 10,
+  "currentBookings": 3,
+  "remainingAvailability": 7,
+  "isAvailableForBooking": true,
+  "price": 250.00,
+  "currency": "SAR",
+  "vehicleTypeId": "vtype_luxury",
+  "assignedDriverId": "drv_comp456",
+  "status": "Active",
+  "isActive": true,
+  "availabilityDate": "2026-03-15T00:00:00Z",
+  "createdAtUtc": "2026-03-01T10:00:00Z",
+  "updatedAtUtc": "2026-03-10T14:30:00Z"
+}
+```
+</ResponseExample>
+
+---
+
+## Update Company Trip
+
+Update details of a company trip route.
+
+<CodeGroup>
+```bash cURL
+curl -X PUT "https://api.masareagles.com/api/companies/{companyId}/trips/{tripId}" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "price": 275.00,
+    "availabilityCount": 15,
+    "isActive": true,
+    "assignedDriverId": "drv_comp789"
+  }'
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  PUT
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/companies/{companyId}/trips/{tripId}`
+</ParamField>
+
+### Request Body
+
+<ParamField body="price" type="decimal">
+  Updated trip price
+</ParamField>
+
+<ParamField body="availabilityCount" type="integer">
+  Updated availability count
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Whether to activate or deactivate the route
+</ParamField>
+
+<ParamField body="assignedDriverId" type="string">
+  Assign or change driver
+</ParamField>
+
+<ParamField body="vehicleTypeId" type="string">
+  Update vehicle type
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Indicates if update succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Result message
+</ResponseField>
+
+<ResponseField name="trip" type="object">
+  Updated trip route details (same structure as Get Company Trip Details)
+</ResponseField>
+
+---
+
+## Delete Company Trip
+
+Delete a company trip route. Only possible if there are no active bookings.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE "https://api.masareagles.com/api/companies/{companyId}/trips/{tripId}" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  DELETE
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/companies/{companyId}/trips/{tripId}`
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Indicates if deletion succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Result message
+</ResponseField>
+
+<ResponseExample>
+```json Success Response
+{
+  "success": true,
+  "message": "تم حذف مسار الرحلة بنجاح"
+}
+```
+
+```json Error - Active Bookings
+{
+  "success": false,
+  "message": "لا يمكن حذف المسار لوجود حجوزات نشطة"
+}
+```
+</ResponseExample>
+
+---
+
+## Search Company Trips
+
+Search for company trip routes with filters.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagles.com/api/companies/{companyId}/trips/search?fromCity=Riyadh&toCity=Jeddah&isActive=true" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  GET
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/companies/{companyId}/trips/search`
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="fromCity" type="string">
+  Filter by origin city
+</ParamField>
+
+<ParamField query="toCity" type="string">
+  Filter by destination city
+</ParamField>
+
+<ParamField query="isActive" type="boolean">
+  Filter by active status
+</ParamField>
+
+<ParamField query="minPrice" type="decimal">
+  Minimum price filter
+</ParamField>
+
+<ParamField query="maxPrice" type="decimal">
+  Maximum price filter
+</ParamField>
+
+### Response
+
+<ResponseField name="trips" type="array">
+  Array of matching company trip routes
+</ResponseField>
+
+<ResponseField name="totalCount" type="integer">
+  Total number of results
+</ResponseField>
+
+---
+
+## Get Public Trip Details
+
+Get details of a specific public trip for passengers.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagles.com/api/public-trips/{tripId}" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  GET
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/public-trips/{tripId}`
+</ParamField>
+
+<ParamField path="tripId" type="string" required>
+  Public trip identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Request success indicator
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Public trip details
+  
+  <Expandable title="Trip Details">
+    <ResponseField name="id" type="string">
+      Trip identifier
+    </ResponseField>
+    
+    <ResponseField name="companyId" type="string">
+      Company identifier
+    </ResponseField>
+    
+    <ResponseField name="companyName" type="string">
+      Company name
+    </ResponseField>
+    
+    <ResponseField name="companyLogo" type="string">
+      Company logo URL
+    </ResponseField>
+    
+    <ResponseField name="companyRating" type="decimal">
+      Company average rating
+    </ResponseField>
+    
+    <ResponseField name="fromCity" type="string">
+      Origin city
+    </ResponseField>
+    
+    <ResponseField name="toCity" type="string">
+      Destination city
+    </ResponseField>
+    
+    <ResponseField name="departureTimeUtc" type="string">
+      Scheduled departure time
+    </ResponseField>
+    
+    <ResponseField name="arrivalTimeUtc" type="string">
+      Expected arrival time
+    </ResponseField>
+    
+    <ResponseField name="pricePerSeat" type="decimal">
+      Price per seat
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string">
+      Currency code
+    </ResponseField>
+    
+    <ResponseField name="totalSeats" type="integer">
+      Total seat capacity
+    </ResponseField>
+    
+    <ResponseField name="availableSeats" type="integer">
+      Currently available seats
+    </ResponseField>
+    
+    <ResponseField name="bookedSeats" type="integer">
+      Number of booked seats
+    </ResponseField>
+    
+    <ResponseField name="driverId" type="string">
+      Assigned driver ID
+    </ResponseField>
+    
+    <ResponseField name="driverName" type="string">
+      Driver name
+    </ResponseField>
+    
+    <ResponseField name="driverPhoto" type="string">
+      Driver photo URL
+    </ResponseField>
+    
+    <ResponseField name="driverRating" type="decimal">
+      Driver rating
+    </ResponseField>
+    
+    <ResponseField name="vehicleId" type="string">
+      Vehicle identifier
+    </ResponseField>
+    
+    <ResponseField name="vehicleModel" type="string">
+      Vehicle model
+    </ResponseField>
+    
+    <ResponseField name="vehicleImageUrl" type="string">
+      Vehicle image URL
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Trip description
+    </ResponseField>
+    
+    <ResponseField name="status" type="string">
+      Trip status
+    </ResponseField>
+    
+    <ResponseField name="stops" type="array">
+      Array of stop locations with coordinates and times
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json Success Response
+{
+  "success": true,
+  "data": {
+    "id": "pubtrip_xyz789",
+    "companyId": "comp_abc123",
+    "companyName": "Eagle Express Transport",
+    "companyLogo": "https://cdn.example.com/companies/eagle.png",
+    "companyRating": 4.7,
+    "fromCity": "Makkah",
+    "fromCityId": "city_makkah",
+    "fromAddress": "Makkah Central Station",
+    "fromLatitude": 21.4225,
+    "fromLongitude": 39.8262,
+    "toCity": "Madinah",
+    "toCityId": "city_madinah",
+    "toAddress": "Madinah Bus Terminal",
+    "toLatitude": 24.5247,
+    "toLongitude": 39.5692,
+    "departureTimeUtc": "2026-03-20T06:00:00Z",
+    "arrivalTimeUtc": "2026-03-20T10:30:00Z",
+    "pricePerSeat": 80.00,
+    "currency": "SAR",
+    "totalSeats": 45,
+    "availableSeats": 32,
+    "bookedSeats": 13,
+    "driverId": "drv_comp456",
+    "driverName": "Hassan Al-Otaibi",
+    "driverPhoto": "https://cdn.example.com/drivers/hassan.jpg",
+    "driverRating": 4.9,
+    "vehicleId": "veh_bus789",
+    "vehicleModel": "Mercedes Tourismo",
+    "vehicleImageUrl": "https://cdn.example.com/vehicles/tourismo.jpg",
+    "description": "Direct express service with rest stop",
+    "status": "Scheduled",
+    "stops": [
+      {
+        "id": "stop_123",
+        "location": "Bahra",
+        "latitude": 22.8167,
+        "longitude": 39.5833,
+        "stopTimeUtc": "2026-03-20T08:00:00Z",
+        "stopOrder": 1,
+        "description": "15-minute break"
+      }
+    ]
+  }
+}
+```
+</ResponseExample>
+
+---
+
+## Get Company Bookings
+
+Retrieve all bookings for a company's trips.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagles.com/api/companies/{companyId}/bookings?status=Pending&page=1&pageSize=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  GET
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/companies/{companyId}/bookings`
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="status" type="string">
+  Filter by booking status (Pending, Confirmed, Cancelled, etc.)
+</ParamField>
+
+<ParamField query="tripId" type="string">
+  Filter by specific trip ID
+</ParamField>
+
+<ParamField query="page" type="integer">
+  Page number (default: 1)
+</ParamField>
+
+<ParamField query="pageSize" type="integer">
+  Results per page (default: 20)
+</ParamField>
+
+### Response
+
+<ResponseField name="bookings" type="array">
+  Array of booking objects with passenger, trip, and payment details
+</ResponseField>
+
+<ResponseField name="totalCount" type="integer">
+  Total number of bookings
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="pageSize" type="integer">
+  Results per page
+</ResponseField>
+
+<ResponseExample>
+```json Success Response
+{
+  "bookings": [
+    {
+      "id": "bkg_comp123",
+      "tripId": "comptrip_abc",
+      "bookingNumber": "BKNG-2026-001234",
+      "passengerId": "psng_xyz",
+      "passengerName": "Fatima Al-Harbi",
+      "passengerPhone": "+966501234567",
+      "status": "Pending",
+      "paymentStatus": "Pending",
+      "amountPaid": 250.00,
+      "currency": "SAR",
+      "tripDateTime": "2026-03-15T08:00:00Z",
+      "pickupLatitude": 24.7136,
+      "pickupLongitude": 46.6753,
+      "pickupAddress": "King Khalid Airport Terminal 1",
+      "dropoffLatitude": 21.5433,
+      "dropoffLongitude": 39.1728,
+      "dropoffAddress": "King Abdulaziz Airport",
+      "createdAtUtc": "2026-03-10T09:30:00Z"
+    }
+  ],
+  "totalCount": 1,
+  "page": 1,
+  "pageSize": 20
+}
+```
+</ResponseExample>

@@ -1,0 +1,589 @@
+---
+title: Notifications Service
+description: Push notification delivery using Firebase Cloud Messaging
+---
+
+## Overview
+
+The Notifications service handles all push notification delivery in the Masar Eagle platform. It uses **Firebase Cloud Messaging (FCM)** to send notifications to mobile devices (iOS and Android) and maintains a notification history for users.
+
+<Info>
+  Notifications service location: `src/services/Notifications/Notifications.Api/Program.cs`
+</Info>
+
+## Core Responsibilities
+
+- **Device Token Management**: Register and manage FCM device tokens
+- **Push Notification Delivery**: Send notifications via Firebase Cloud Messaging
+- **Notification History**: Store and retrieve sent notifications
+- **User Notifications**: Get user-specific notifications with read/unread status
+- **Notification Tracking**: Mark notifications as read
+- **Event-Driven Notifications**: Listen for events from other services and send appropriate notifications
+
+## Technology Stack
+
+- **ASP.NET Core Minimal APIs**: Endpoint definitions
+- **Firebase Admin SDK**: FCM integration for push notifications
+- **PostgreSQL**: Notification and device token storage
+- **Entity Framework Core**: Database access via LinqToDB
+- **Wolverine**: Message bus for consuming events
+- **RabbitMQ**: Event consumption from other services
+- **OpenTelemetry**: Distributed tracing
+
+## Program.cs Configuration
+
+```csharp Program.cs
+using Notifications.Api.Infrastructure.Extensions;
+using Notifications.Api.Services;
+using Notifications.Api.Infrastructure.Repositories;
+using ServiceDefaults;
+using Common;
+using Wolverine.RabbitMQ;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+builder.AddServiceDefaults();
+builder.AddDatabase();
+
+builder.Services.AddHealthChecks();
+builder.Services.AddEndpointsApiExplorer();
+
+// Swagger configuration
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo 
+    { 
+        Title = "Masar Eagle Notifications API", 
+        Version = "v1",
+        Description = "API for managing push notifications, device tokens, and notification history"
+    });
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
+});
+
+// CORS - allow all origins
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader()));
+
+builder.Services.AddAppAuthentication(builder.Configuration);
+
+// OpenTelemetry for tracing
+builder.Services.AddOpenTelemetry().WithTracing(traceProviderBuilder =>
+    traceProviderBuilder.SetResourceBuilder(ResourceBuilder.CreateDefault()
+            .AddService(builder.Environment.ApplicationName))
+        .AddSource("Wolverine"));
+
+// Core services
+builder.Services.AddSingleton<FirebaseNotificationService>();
+builder.Services.AddScoped<IDeviceTokenRepository, DeviceTokenRepository>();
+
+// HTTP client for Users service
+builder.Services.AddHttpClient<UsersApiClient>("user", 
+    client => client.BaseAddress = new Uri("https+http://user"))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = 
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    })
+    .AddServiceDiscovery();
+
+builder.Services.AddScoped<IUsersApiService>(provider =>
+{
+    var factory = provider.GetRequiredService<IHttpClientFactory>();
+    var httpClient = factory.CreateClient("user");
+    var logger = provider.GetRequiredService<ILogger<UsersApiClient>>();
+    return new UsersApiClient(httpClient, logger);
+});
+
+// Wolverine messaging with RabbitMQ
+await builder.UseWolverineWithRabbitMqAsync(opts =>
+{
+    opts.ListenToRabbitQueue(Components.RabbitMQConfig.QueueName,
+        cfg => cfg.BindExchange(Components.RabbitMQConfig.ExchangeName));
+    opts.ApplicationAssembly = typeof(Program).Assembly;
+});
+
+WebApplication app = builder.Build();
+
+app.UseGlobalExceptionHandler();
+
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Masar Eagle Notifications API v1");
+    c.RoutePrefix = "swagger";
+});
+
+app.UseCors();
+app.UseAppAuthentication();
+
+app.MapDefaultEndpoints();
+app.MapEndpointsFromAssembly(typeof(Program).Assembly);
+
+await app.RunAsync();
+```
+
+## API Endpoints
+
+### Device Token Management
+
+#### Register Device Token
+
+Register a device for push notifications:
+
+```http
+POST /api/devices/register
+Content-Type: application/json
+
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "userType": "Driver",
+  "deviceToken": "fxlKjh3...FCM_TOKEN...k9sLmP",
+  "platform": "iOS",
+  "appVersion": "1.2.5"
+}
+```
+
+<ParamField path="userId" type="string" required>
+  User's unique identifier (GUID)
+</ParamField>
+
+<ParamField path="userType" type="string" required>
+  One of: `Driver`, `Passenger`, `Admin`, `Company`
+</ParamField>
+
+<ParamField path="deviceToken" type="string" required>
+  FCM device token from the mobile app
+</ParamField>
+
+<ParamField path="platform" type="string">
+  Platform: `iOS` or `Android`
+</ParamField>
+
+<ParamField path="appVersion" type="string">
+  App version (e.g., "1.2.5")
+</ParamField>
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "تم تسجيل جهازك بنجاح"
+}
+```
+
+#### Activate All Device Tokens
+
+Reactivate all device tokens for a user:
+
+```http
+POST /api/device-tokens/{userId}/activate
+Authorization: Bearer {token}
+```
+
+#### Deactivate All Device Tokens
+
+Deactivate all device tokens (e.g., on logout):
+
+```http
+POST /api/device-tokens/{userId}/deactivate
+Authorization: Bearer {token}
+```
+
+### Notification Retrieval
+
+#### Get User Notifications
+
+Retrieve notifications for a specific user with pagination:
+
+```http
+GET /api/notifications/{userId}?isRead=false&page=1&pageSize=20
+Authorization: Bearer {token}
+```
+
+**Query Parameters:**
+- `isRead` (optional): Filter by read status (`true`, `false`, or omit for all)
+- `page` (default: 1): Page number
+- `pageSize` (default: 20): Items per page
+
+**Response:**
+```json
+{
+  "notifications": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "notificationType": "TripStarted",
+      "title": "رحلتك بدأت",
+      "body": "السائق أحمد بدأ رحلتك إلى الرياض",
+      "data": {
+        "tripId": "abc123",
+        "driverId": "def456"
+      },
+      "isRead": false,
+      "sentAtUtc": "2026-03-10T08:30:00Z",
+      "readAtUtc": null,
+      "createdAtUtc": "2026-03-10T08:30:00Z"
+    }
+  ],
+  "totalCount": 45,
+  "unreadCount": 12,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+#### Get All Notifications (Admin)
+
+Retrieve all notifications across all users:
+
+```http
+GET /api/notifications?page=1&pageSize=50
+Authorization: Bearer {admin-token}
+```
+
+### Notification Actions
+
+#### Mark Notification as Read
+
+```http
+POST /api/notifications/{notificationId}/read
+Authorization: Bearer {token}
+```
+
+#### Mark Multiple Notifications as Read
+
+```http
+POST /api/notifications/mark-as-read
+Content-Type: application/json
+Authorization: Bearer {token}
+
+{
+  "notificationIds": [
+    "123e4567-e89b-12d3-a456-426614174000",
+    "234e5678-f90c-23e4-b567-537725285111"
+  ]
+}
+```
+
+## Firebase Configuration
+
+The service requires a Firebase service account JSON file for FCM integration:
+
+1. Download service account key from Firebase Console
+2. Set environment variable:
+   ```bash
+   export GOOGLE_APPLICATION_CREDENTIALS="/path/to/serviceAccountKey.json"
+   ```
+3. The `FirebaseNotificationService` automatically initializes Firebase Admin SDK
+
+### Sending Notifications
+
+Internal service for sending notifications:
+
+```csharp FirebaseNotificationService.cs
+public async Task<bool> SendNotificationAsync(
+    string deviceToken,
+    string title,
+    string body,
+    Dictionary<string, string>? data = null)
+{
+    var message = new Message
+    {
+        Token = deviceToken,
+        Notification = new Notification
+        {
+            Title = title,
+            Body = body
+        },
+        Data = data,
+        Android = new AndroidConfig
+        {
+            Priority = Priority.High,
+            Notification = new AndroidNotification
+            {
+                Sound = "default",
+                ChannelId = "default"
+            }
+        },
+        Apns = new ApnsConfig
+        {
+            Aps = new Aps
+            {
+                Sound = "default",
+                Badge = 1
+            }
+        }
+    };
+
+    try
+    {
+        string response = await FirebaseMessaging.DefaultInstance
+            .SendAsync(message);
+        return true;
+    }
+    catch (FirebaseMessagingException ex)
+    {
+        _logger.LogError(ex, "Failed to send FCM notification");
+        return false;
+    }
+}
+```
+
+## Event-Driven Notifications
+
+The Notifications service listens to events from other services via RabbitMQ and sends appropriate notifications:
+
+### Consumed Events
+
+<Tabs>
+  <Tab title="Trip Events">
+    **TripCreated**
+    - Notify driver of new booking request
+    - Notify passenger of booking confirmation
+
+    **TripStarted**
+    - Notify passenger that trip has started
+    - Notify company (if applicable)
+
+    **TripCompleted**
+    - Notify both driver and passenger
+    - Prompt for reviews
+
+    **TripCancelled**
+    - Notify affected parties
+    - Include cancellation reason
+  </Tab>
+
+  <Tab title="Booking Events">
+    **BookingAccepted**
+    - Notify passenger of acceptance
+    - Include driver details
+
+    **BookingRejected**
+    - Notify passenger of rejection
+    - Suggest alternative trips
+
+    **BookingCancelled**
+    - Notify driver if passenger cancels
+    - Notify passenger if admin cancels
+  </Tab>
+
+  <Tab title="User Events">
+    **DriverApproved**
+    - Welcome message to newly approved driver
+    - Next steps for starting work
+
+    **DriverRejected**
+    - Inform driver of rejection
+    - Reasons for rejection
+
+    **PasswordChanged**
+    - Security notification
+  </Tab>
+
+  <Tab title="Payment Events">
+    **PaymentReceived**
+    - Confirm payment to passenger
+    - Notify driver of earnings
+
+    **WithdrawalApproved**
+    - Notify driver of approved withdrawal
+    - Include bank transfer details
+
+    **WalletTopUpApproved**
+    - Confirm wallet top-up
+  </Tab>
+</Tabs>
+
+### Example Event Handler
+
+```csharp
+public class TripStartedHandler
+{
+    private readonly FirebaseNotificationService _notificationService;
+    private readonly IDeviceTokenRepository _deviceTokenRepository;
+    private readonly AppDataConnection _db;
+
+    public async Task Handle(TripStartedEvent @event)
+    {
+        // Get passenger device tokens
+        var tokens = await _deviceTokenRepository
+            .GetActiveTokensAsync(@event.PassengerId, "Passenger");
+
+        // Send notification to each device
+        foreach (var token in tokens)
+        {
+            await _notificationService.SendNotificationAsync(
+                token.DeviceToken,
+                "رحلتك بدأت",
+                $"السائق {@event.DriverName} بدأ رحلتك إلى {@event.Destination}",
+                new Dictionary<string, string>
+                {
+                    ["tripId"] = @event.TripId,
+                    ["driverId"] = @event.DriverId,
+                    ["notificationType"] = "TripStarted"
+                }
+            );
+        }
+
+        // Store notification in database
+        await _db.GetTable<NotificationRow>().InsertAsync(() => new NotificationRow
+        {
+            Id = Guid.NewGuid().ToString(),
+            RecipientId = @event.PassengerId,
+            NotificationType = "TripStarted",
+            Title = "رحلتك بدأت",
+            Body = $"السائق {@event.DriverName} بدأ رحلتك إلى {@event.Destination}",
+            Data = JsonSerializer.Serialize(new
+            {
+                tripId = @event.TripId,
+                driverId = @event.DriverId
+            }),
+            IsRead = false,
+            SentAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+    }
+}
+```
+
+## Database Schema
+
+The service uses two main tables:
+
+### NotificationRow
+
+```sql
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY,
+    recipient_id VARCHAR(100) NOT NULL,
+    notification_type VARCHAR(50) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    data JSONB,
+    is_read BOOLEAN DEFAULT FALSE,
+    sent_at_utc TIMESTAMP NOT NULL,
+    read_at_utc TIMESTAMP,
+    created_at_utc TIMESTAMP NOT NULL,
+    INDEX idx_recipient_id (recipient_id),
+    INDEX idx_is_read (is_read),
+    INDEX idx_sent_at (sent_at_utc)
+);
+```
+
+### DeviceTokenRow
+
+```sql
+CREATE TABLE device_tokens (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    user_type VARCHAR(20) NOT NULL,
+    device_token TEXT NOT NULL UNIQUE,
+    platform VARCHAR(20),
+    app_version VARCHAR(20),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at_utc TIMESTAMP NOT NULL,
+    updated_at_utc TIMESTAMP NOT NULL,
+    INDEX idx_user_id (user_id),
+    INDEX idx_device_token (device_token),
+    INDEX idx_is_active (is_active)
+);
+```
+
+## Notification Types
+
+Common notification types in the system:
+
+- `TripCreated` - New trip booking
+- `TripStarted` - Trip has begun
+- `TripCompleted` - Trip finished
+- `TripCancelled` - Trip cancelled
+- `BookingAccepted` - Booking approved
+- `BookingRejected` - Booking declined
+- `PaymentReceived` - Payment confirmed
+- `DriverApproved` - Driver verification approved
+- `DriverRejected` - Driver verification rejected
+- `WithdrawalApproved` - Withdrawal request approved
+- `WalletTopUpApproved` - Wallet top-up confirmed
+- `ReviewReceived` - New review posted
+- `TripReminder` - Upcoming trip reminder
+
+## Error Handling
+
+The service handles various error scenarios:
+
+### Invalid Device Token
+
+When FCM returns an error for an invalid token, the service automatically deactivates it:
+
+```csharp
+catch (FirebaseMessagingException ex) when (ex.ErrorCode == "registration-token-not-registered")
+{
+    await _deviceTokenRepository.DeactivateTokenAsync(deviceToken);
+}
+```
+
+### Missing User Data
+
+If the Users service is unavailable, notifications are still stored in the database and can be retried:
+
+```csharp
+try
+{
+    var user = await _usersApiService.GetUserAsync(userId, userType);
+}
+catch (HttpRequestException)
+{
+    _logger.LogWarning("Users service unavailable, notification queued");
+    // Notification is stored in DB and can be sent later
+}
+```
+
+## Inter-Service Communication
+
+The Notifications service communicates with:
+
+### Users Service
+
+To retrieve user information for personalized notifications:
+
+```csharp
+var user = await usersApiClient.GetUserAsync(userId, userType);
+var userName = user.Name;
+var preferredLanguage = user.Language;
+```
+
+## Swagger Documentation
+
+API documentation is available at:
+
+```
+GET /swagger
+```
+
+## Health Checks
+
+The service exposes health check endpoints:
+
+- `/health` - Overall health
+- `/live` - Liveness probe
+- `/ready` - Readiness probe
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Trips Service" icon="car" href="/services/trips">
+    Publishes trip-related events
+  </Card>
+  <Card title="Users Service" icon="users" href="/services/users">
+    Publishes user-related events and provides user data
+  </Card>
+  <Card title="Gateway" icon="network-wired" href="/services/gateway">
+    Routes notification API requests
+  </Card>
+  <Card title="Identity Service" icon="key" href="/services/identity">
+    Authenticates notification API requests
+  </Card>
+</CardGroup>

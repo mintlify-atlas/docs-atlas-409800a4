@@ -1,0 +1,631 @@
+---
+title: 'Authentication'
+description: 'OAuth 2.0 authentication with OTP and password flows'
+icon: 'key'
+---
+
+## Overview
+
+Masar Eagle uses **OAuth 2.0** with **OpenIddict** for authentication and authorization. The API supports multiple authentication flows:
+
+- **OTP Flow** - Custom grant type for drivers and passengers using phone number verification
+- **Password Flow** - Username/password authentication for admins and companies
+- **Refresh Token Flow** - Token renewal without re-authentication
+
+## Token Endpoint
+
+All authentication requests are made to the token endpoint:
+
+```text
+POST /connect/token
+```
+
+This endpoint accepts form-encoded requests and returns JWT access tokens.
+
+## Authentication Flows
+
+### OTP Flow (Phone Number Verification)
+
+Used for **drivers** and **passengers** to authenticate using phone number and OTP code.
+
+#### Step 1: Request OTP
+
+First, request an OTP code to be sent to the user's phone:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.masareagle.com/api/auth/send-otp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+966501234567"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.masareagle.com/api/auth/send-otp', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    phoneNumber: '+966501234567'
+  })
+});
+
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'https://api.masareagle.com/api/auth/send-otp',
+    json={'phoneNumber': '+966501234567'}
+)
+
+data = response.json()
+```
+</CodeGroup>
+
+**Response:**
+
+```json
+{
+  "message": "تم إرسال رمز التحقق بنجاح",
+  "expiresAt": "2024-03-10T14:35:00.000Z",
+  "code": "123456"
+}
+```
+
+<Note>
+The `code` field is only included in development/testing environments. In production, the OTP is sent via SMS only.
+</Note>
+
+#### OTP Configuration
+
+- **Code Length**: 6 digits
+- **Expiry Time**: 5 minutes
+- **Max Attempts**: 5 verification attempts
+- **Resend Limit**: 3 times within 30-minute window
+- **Cooldown**: 1 minute between resend requests
+
+#### Step 2: Resend OTP (Optional)
+
+If the user didn't receive the OTP, they can request a resend:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.masareagle.com/api/auth/resend-otp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+966501234567"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.masareagle.com/api/auth/resend-otp', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    phoneNumber: '+966501234567'
+  })
+});
+```
+</CodeGroup>
+
+#### Step 3: Exchange OTP for Token
+
+Once the user enters the OTP code, exchange it for an access token:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.masareagle.com/connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=urn:masareagle:otp" \
+  -d "phone_number=%2B966501234567" \
+  -d "otp_code=123456" \
+  -d "user_type=driver"
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  grant_type: 'urn:masareagle:otp',
+  phone_number: '+966501234567',
+  otp_code: '123456',
+  user_type: 'driver'
+});
+
+const response = await fetch('https://api.masareagle.com/connect/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: params
+});
+
+const tokens = await response.json();
+```
+
+```python Python
+import requests
+
+data = {
+    'grant_type': 'urn:masareagle:otp',
+    'phone_number': '+966501234567',
+    'otp_code': '123456',
+    'user_type': 'driver'
+}
+
+response = requests.post(
+    'https://api.masareagle.com/connect/token',
+    data=data
+)
+
+tokens = response.json()
+```
+</CodeGroup>
+
+**Request Parameters:**
+
+<ParamField body="grant_type" type="string" required>
+  Must be `urn:masareagle:otp` for OTP authentication
+</ParamField>
+
+<ParamField body="phone_number" type="string" required>
+  Phone number in E.164 format (e.g., `+966501234567`)
+</ParamField>
+
+<ParamField body="otp_code" type="string" required>
+  6-digit OTP code received via SMS
+</ParamField>
+
+<ParamField body="user_type" type="string" required>
+  User type: `driver` or `passenger`
+</ParamField>
+
+**Success Response:**
+
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "scope": "openid offline_access roles api"
+}
+```
+
+### Password Flow (Admin & Company)
+
+Used for **admins** and **companies** to authenticate using email and password.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.masareagle.com/connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password" \
+  -d "username=admin@masareagle.com" \
+  -d "password=SecurePassword123!" \
+  -d "user_type=admin"
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  grant_type: 'password',
+  username: 'admin@masareagle.com',
+  password: 'SecurePassword123!',
+  user_type: 'admin'
+});
+
+const response = await fetch('https://api.masareagle.com/connect/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: params
+});
+
+const tokens = await response.json();
+```
+
+```python Python
+data = {
+    'grant_type': 'password',
+    'username': 'admin@masareagle.com',
+    'password': 'SecurePassword123!',
+    'user_type': 'admin'
+}
+
+response = requests.post(
+    'https://api.masareagle.com/connect/token',
+    data=data
+)
+
+tokens = response.json()
+```
+</CodeGroup>
+
+**Request Parameters:**
+
+<ParamField body="grant_type" type="string" required>
+  Must be `password` for credential-based authentication
+</ParamField>
+
+<ParamField body="username" type="string" required>
+  Email address of the admin or company user
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User password
+</ParamField>
+
+<ParamField body="user_type" type="string" required>
+  User type: `admin` or `company`
+</ParamField>
+
+<Warning>
+Password flow is only supported for `admin` and `company` user types. Attempting to use it with `driver` or `passenger` will return an error.
+</Warning>
+
+### Refresh Token Flow
+
+Use a refresh token to obtain a new access token without re-authenticating:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.masareagle.com/connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=refresh_token" \
+  -d "refresh_token=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  grant_type: 'refresh_token',
+  refresh_token: refreshToken
+});
+
+const response = await fetch('https://api.masareagle.com/connect/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: params
+});
+
+const tokens = await response.json();
+```
+</CodeGroup>
+
+**Request Parameters:**
+
+<ParamField body="grant_type" type="string" required>
+  Must be `refresh_token`
+</ParamField>
+
+<ParamField body="refresh_token" type="string" required>
+  The refresh token received from a previous authentication
+</ParamField>
+
+## Token Details
+
+### Access Token
+
+- **Format**: JWT (JSON Web Token)
+- **Lifetime**: 60 minutes (configurable)
+- **Algorithm**: RS256 (RSA with SHA-256)
+- **Issuer**: `masareagle.identity`
+- **Audience**: `masar-eagle-api`
+
+### Token Claims
+
+The access token includes the following claims:
+
+```json
+{
+  "sub": "123e4567-e89b-12d3-a456-426614174000",
+  "role": "driver",
+  "iss": "https://masareagle.identity",
+  "aud": "masar-eagle-api",
+  "scope": "openid offline_access roles api",
+  "exp": 1710345000,
+  "iat": 1710341400
+}
+```
+
+<ParamField query="sub" type="string">
+  Subject - User ID (UUID)
+</ParamField>
+
+<ParamField query="role" type="string">
+  User role: `admin`, `company`, `driver`, or `passenger`
+</ParamField>
+
+<ParamField query="iss" type="string">
+  Issuer - Identity service URL
+</ParamField>
+
+<ParamField query="aud" type="string">
+  Audience - Target API
+</ParamField>
+
+<ParamField query="scope" type="string">
+  Granted scopes (space-separated)
+</ParamField>
+
+<ParamField query="exp" type="number">
+  Expiration time (Unix timestamp)
+</ParamField>
+
+<ParamField query="iat" type="number">
+  Issued at time (Unix timestamp)
+</ParamField>
+
+### Refresh Token
+
+- **Lifetime**: 30 days
+- **Usage**: Can be used once to obtain a new access token and refresh token pair
+- **Storage**: Store securely on client (encrypted storage, not localStorage)
+
+## Using Access Tokens
+
+Include the access token in the `Authorization` header of API requests:
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://api.masareagle.com/api/drivers/me \
+  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.masareagle.com/api/drivers/me', {
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+```
+
+```python Python
+headers = {
+    'Authorization': f'Bearer {access_token}'
+}
+
+response = requests.get(
+    'https://api.masareagle.com/api/drivers/me',
+    headers=headers
+)
+```
+</CodeGroup>
+
+## Authentication Errors
+
+Authentication failures return an HTTP 403 Forbidden response with error details:
+
+<CodeGroup>
+```json Invalid OTP
+{
+  "error": "invalid_grant",
+  "error_description": "رمز التحقق غير صالح أو منتهي الصلاحية"
+}
+```
+
+```json Invalid Credentials
+{
+  "error": "invalid_grant",
+  "error_description": "البريد الإلكتروني أو كلمة المرور غير صحيحة"
+}
+```
+
+```json Missing Parameters
+{
+  "error": "invalid_request",
+  "error_description": "رقم الهاتف مطلوب"
+}
+```
+
+```json Unsupported Grant Type
+{
+  "error": "unsupported_grant_type",
+  "error_description": "نوع المنح غير مدعوم"
+}
+```
+
+```json Expired Refresh Token
+{
+  "error": "invalid_grant",
+  "error_description": "رمز التحديث غير صالح أو منتهي الصلاحية"
+}
+```
+</CodeGroup>
+
+### Common Error Codes
+
+| Error Code | Description |
+|------------|-------------|
+| `invalid_request` | Required parameter missing or invalid |
+| `invalid_grant` | Invalid credentials, OTP, or refresh token |
+| `unsupported_grant_type` | Grant type not supported |
+| `invalid_client` | Client authentication failed |
+
+## User Provisioning
+
+When a user authenticates for the first time:
+
+1. The OTP is verified
+2. A `UserAuthenticatedEvent` is published to the message bus
+3. The Users service provisions the user profile asynchronously
+4. The token endpoint waits up to 1 second for provisioning, then retries
+5. An access token is issued with the user's ID
+
+<Info>
+If provisioning takes longer than expected, the token endpoint will retry once after a 1-second delay. This handles race conditions during initial user creation.
+</Info>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Token Storage" icon="vault">
+    - Store tokens securely (encrypted storage)
+    - Never store in localStorage (XSS risk)
+    - Use secure, httpOnly cookies or mobile secure storage
+  </Card>
+  
+  <Card title="Token Refresh" icon="rotate">
+    - Refresh tokens before expiry
+    - Implement automatic token refresh
+    - Handle refresh failures gracefully
+  </Card>
+  
+  <Card title="HTTPS Only" icon="lock">
+    - Always use HTTPS in production
+    - Never send tokens over HTTP
+    - Validate SSL certificates
+  </Card>
+  
+  <Card title="Error Handling" icon="shield-halved">
+    - Don't log tokens or sensitive data
+    - Handle 401 responses by re-authenticating
+    - Implement exponential backoff for retries
+  </Card>
+</CardGroup>
+
+## Code Example: Complete Authentication Flow
+
+<CodeGroup>
+```javascript JavaScript - OTP Flow
+class AuthService {
+  constructor(baseURL) {
+    this.baseURL = baseURL;
+    this.accessToken = null;
+    this.refreshToken = null;
+  }
+
+  async sendOTP(phoneNumber) {
+    const response = await fetch(`${this.baseURL}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to send OTP');
+    }
+    
+    return response.json();
+  }
+
+  async verifyOTP(phoneNumber, otpCode, userType) {
+    const params = new URLSearchParams({
+      grant_type: 'urn:masareagle:otp',
+      phone_number: phoneNumber,
+      otp_code: otpCode,
+      user_type: userType
+    });
+
+    const response = await fetch(`${this.baseURL}/connect/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error_description || 'Authentication failed');
+    }
+
+    const tokens = await response.json();
+    this.accessToken = tokens.access_token;
+    this.refreshToken = tokens.refresh_token;
+    
+    // Store tokens securely
+    this.storeTokens(tokens);
+    
+    return tokens;
+  }
+
+  async refreshAccessToken() {
+    if (!this.refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: this.refreshToken
+    });
+
+    const response = await fetch(`${this.baseURL}/connect/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
+
+    if (!response.ok) {
+      // Refresh token invalid - need to re-authenticate
+      this.clearTokens();
+      throw new Error('Session expired');
+    }
+
+    const tokens = await response.json();
+    this.accessToken = tokens.access_token;
+    this.refreshToken = tokens.refresh_token;
+    
+    this.storeTokens(tokens);
+    
+    return tokens;
+  }
+
+  async apiRequest(endpoint, options = {}) {
+    const headers = {
+      ...options.headers,
+      'Authorization': `Bearer ${this.accessToken}`
+    };
+
+    let response = await fetch(`${this.baseURL}${endpoint}`, {
+      ...options,
+      headers
+    });
+
+    // Auto-refresh on 401
+    if (response.status === 401) {
+      await this.refreshAccessToken();
+      
+      headers.Authorization = `Bearer ${this.accessToken}`;
+      response = await fetch(`${this.baseURL}${endpoint}`, {
+        ...options,
+        headers
+      });
+    }
+
+    return response;
+  }
+
+  storeTokens(tokens) {
+    // Store in secure storage (implementation depends on platform)
+    // For web: encrypted sessionStorage or secure cookie
+    // For mobile: Keychain/Keystore
+  }
+
+  clearTokens() {
+    this.accessToken = null;
+    this.refreshToken = null;
+    // Clear from secure storage
+  }
+}
+
+// Usage
+const auth = new AuthService('https://api.masareagle.com');
+
+// Step 1: Send OTP
+await auth.sendOTP('+966501234567');
+
+// Step 2: User enters OTP code
+await auth.verifyOTP('+966501234567', '123456', 'driver');
+
+// Step 3: Make authenticated requests
+const response = await auth.apiRequest('/api/drivers/me');
+const profile = await response.json();
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/api/error-handling">
+    Learn how to handle API errors
+  </Card>
+  <Card title="API Overview" icon="compass" href="/api/overview">
+    Explore the full API structure
+  </Card>
+</CardGroup>

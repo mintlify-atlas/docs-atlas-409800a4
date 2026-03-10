@@ -1,0 +1,410 @@
+---
+title: "Device Token Management"
+api: "POST https://api.masareagle.com/api/devices/register"
+description: "Register and manage device tokens for push notifications"
+---
+
+## Overview
+
+Device tokens are required to send push notifications to user devices via Firebase Cloud Messaging. Users must register their device token with the Notifications service to receive push notifications.
+
+## Register Device Token
+
+<Note>
+This endpoint is publicly accessible and does not require authentication. Device tokens should be registered when the user logs in or when the app starts.
+</Note>
+
+### Request Body
+
+<ParamField body="userId" type="string" required>
+  The unique identifier of the user
+</ParamField>
+
+<ParamField body="userType" type="string" required>
+  Type of user account. Must be one of:
+  - `Driver` - Driver account
+  - `Passenger` - Passenger account
+  - `Admin` - Admin account
+  - `Company` - Company account
+</ParamField>
+
+<ParamField body="deviceToken" type="string" required>
+  Firebase Cloud Messaging (FCM) device token obtained from the mobile app or web app
+</ParamField>
+
+<ParamField body="platform" type="string">
+  Device platform. Common values:
+  - `Android` - Android device
+  - `iOS` - iOS device
+  - `Web` - Web browser
+</ParamField>
+
+<ParamField body="appVersion" type="string">
+  Application version number (e.g., "1.2.3")
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the registration was successful
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable message in Arabic describing the result
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.masareagle.com/api/devices/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "driver_123",
+    "userType": "Driver",
+    "deviceToken": "fK8xY3zQT_u9qH2wR...",
+    "platform": "Android",
+    "appVersion": "1.5.0"
+  }'
+```
+
+<RequestExample>
+```json Request
+{
+  "userId": "driver_123",
+  "userType": "Driver",
+  "deviceToken": "fK8xY3zQT_u9qH2wRjLpN5vM1cX7bA4dE6gH8iJ0kL2mN4oP6qR8sT0uV2wX4yZ6",
+  "platform": "Android",
+  "appVersion": "1.5.0"
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json 200 Success
+{
+  "success": true,
+  "message": "تم تسجيل جهازك بنجاح"
+}
+```
+
+```json 400 Missing Fields
+{
+  "success": false,
+  "message": "المعلومات المطلوبة غير مكتملة"
+}
+```
+
+```json 400 Invalid User Type
+{
+  "success": false,
+  "message": "نوع المستخدم غير صحيح. يجب أن يكون أحد: Driver, Passenger, Admin, Company"
+}
+```
+</ResponseExample>
+
+## Device Token Behavior
+
+### Add or Update
+
+When registering a device token:
+
+1. **Existing Token for Same User**: If the device token already exists for the user, it updates the record and marks it as active
+2. **Token Registered to Different User**: If the token is registered to a different user, it transfers the token to the new user (removes from old user)
+3. **New Token**: If it's a new token, it creates a new registration record
+
+### Multiple Devices
+
+Users can have multiple device tokens registered (e.g., phone, tablet, web browser). Notifications will be sent to all active devices.
+
+### Token States
+
+- **Active**: Token can receive notifications
+- **Inactive**: Token will not receive notifications (manually deactivated)
+
+## Activate All Device Tokens
+
+<api>POST https://api.masareagle.com/api/device-tokens/{userId}/activate-all</api>
+
+Activate all device tokens for a user to resume receiving notifications.
+
+### Path Parameters
+
+<ParamField path="userId" type="string" required>
+  The user ID to activate tokens for
+</ParamField>
+
+### Response
+
+```json 200 Success
+{
+  "message": "activated"
+}
+```
+
+```json 400 Bad Request
+{
+  "message": "userId is required"
+}
+```
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.masareagle.com/api/device-tokens/driver_123/activate-all
+```
+
+## Deactivate All Device Tokens
+
+<api>POST https://api.masareagle.com/api/device-tokens/{userId}/deactivate-all</api>
+
+Deactivate all device tokens for a user to stop receiving notifications. Use this when a user logs out or disables notifications.
+
+### Path Parameters
+
+<ParamField path="userId" type="string" required>
+  The user ID to deactivate tokens for
+</ParamField>
+
+### Response
+
+```json 200 Success
+{
+  "message": "deactivated"
+}
+```
+
+```json 400 Bad Request
+{
+{
+  "message": "userId is required"
+}
+```
+
+### Example Request
+
+```bash cURL
+curl -X POST https://api.masareagle.com/api/device-tokens/driver_123/deactivate-all
+```
+
+## Database Schema
+
+Device tokens are stored in the `device_tokens` table:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Primary key (format: `dt_{guid}`) |
+| `user_id` | string | User identifier |
+| `user_type` | string | User type (Driver, Passenger, Admin, Company) |
+| `device_token` | string | FCM device token |
+| `platform` | string | Device platform (Android, iOS, Web) |
+| `app_version` | string | App version number |
+| `is_active` | boolean | Whether token is active |
+| `created_at_utc` | datetime | When token was first registered |
+| `updated_at_utc` | datetime | When token was last updated |
+
+## Implementation Guide
+
+### Android (Kotlin)
+
+```kotlin
+import com.google.firebase.messaging.FirebaseMessaging
+
+// Get FCM token
+FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+    if (task.isSuccessful) {
+        val token = task.result
+        registerDeviceToken(userId, userType, token, "Android", BuildConfig.VERSION_NAME)
+    }
+}
+
+fun registerDeviceToken(userId: String, userType: String, token: String, platform: String, appVersion: String) {
+    val request = RegisterDeviceTokenRequest(
+        userId = userId,
+        userType = userType,
+        deviceToken = token,
+        platform = platform,
+        appVersion = appVersion
+    )
+    
+    api.registerDevice(request).enqueue(object : Callback<RegisterDeviceTokenResponse> {
+        override fun onResponse(call: Call<RegisterDeviceTokenResponse>, response: Response<RegisterDeviceTokenResponse>) {
+            if (response.isSuccessful && response.body()?.success == true) {
+                Log.d("FCM", "Device registered successfully")
+            }
+        }
+        
+        override fun onFailure(call: Call<RegisterDeviceTokenResponse>, t: Throwable) {
+            Log.e("FCM", "Failed to register device", t)
+        }
+    })
+}
+```
+
+### iOS (Swift)
+
+```swift
+import FirebaseMessaging
+
+// Get FCM token
+Messaging.messaging().token { token, error in
+    if let error = error {
+        print("Error fetching FCM token: \(error)")
+    } else if let token = token {
+        registerDeviceToken(userId: userId, userType: userType, token: token, platform: "iOS", appVersion: appVersion)
+    }
+}
+
+func registerDeviceToken(userId: String, userType: String, token: String, platform: String, appVersion: String) {
+    let request = RegisterDeviceTokenRequest(
+        userId: userId,
+        userType: userType,
+        deviceToken: token,
+        platform: platform,
+        appVersion: appVersion
+    )
+    
+    APIClient.shared.registerDevice(request) { result in
+        switch result {
+        case .success(let response):
+            if response.success {
+                print("Device registered successfully")
+            }
+        case .failure(let error):
+            print("Failed to register device: \(error)")
+        }
+    }
+}
+```
+
+### Web (JavaScript)
+
+```javascript
+import { getMessaging, getToken } from "firebase/messaging";
+
+const messaging = getMessaging();
+
+// Request notification permission
+Notification.requestPermission().then((permission) => {
+  if (permission === 'granted') {
+    // Get FCM token
+    getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY' })
+      .then((token) => {
+        registerDeviceToken(userId, userType, token, 'Web', appVersion);
+      })
+      .catch((err) => {
+        console.error('Error getting FCM token:', err);
+      });
+  }
+});
+
+async function registerDeviceToken(userId, userType, token, platform, appVersion) {
+  try {
+    const response = await fetch('https://api.masareagle.com/api/devices/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId,
+        userType,
+        deviceToken: token,
+        platform,
+        appVersion,
+      }),
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      console.log('Device registered successfully');
+    }
+  } catch (error) {
+    console.error('Failed to register device:', error);
+  }
+}
+```
+
+## Common Use Cases
+
+### User Login
+
+```javascript
+// Register device token after successful login
+await loginUser(email, password);
+const fcmToken = await getFCMToken();
+await registerDeviceToken(user.id, user.type, fcmToken, platform, appVersion);
+```
+
+### User Logout
+
+```javascript
+// Deactivate tokens when user logs out
+await deactivateAllTokens(user.id);
+await logoutUser();
+```
+
+### Token Refresh
+
+```javascript
+// Update token if it changes (rare but possible)
+firebaseMessaging.onTokenRefresh(async (newToken) => {
+  await registerDeviceToken(user.id, user.type, newToken, platform, appVersion);
+});
+```
+
+### Enable/Disable Notifications
+
+```javascript
+// User toggles notification settings
+async function setNotificationsEnabled(enabled) {
+  if (enabled) {
+    await activateAllTokens(userId);
+  } else {
+    await deactivateAllTokens(userId);
+  }
+}
+```
+
+## Troubleshooting
+
+### No Notifications Received
+
+1. **Check Token Registration**: Verify the device token is registered and active
+2. **Check Firebase Console**: Ensure FCM is configured correctly
+3. **Check Notification History**: Verify notifications are being saved to database
+4. **Check Device Permissions**: Ensure app has notification permissions
+5. **Check Token Validity**: FCM tokens can expire, re-register if needed
+
+### Multiple Devices Not Working
+
+- Each device needs its own unique FCM token
+- All tokens for a user should be registered separately
+- Verify all tokens are marked as active
+
+### Notifications Going to Wrong User
+
+- This can happen if a device token is reused
+- The system automatically transfers tokens between users
+- Ensure you deactivate tokens on logout
+
+## Security Considerations
+
+<Warning>
+**Important Security Notes:**
+
+1. Device tokens are sensitive - treat them like passwords
+2. Always use HTTPS when transmitting tokens
+3. Deactivate tokens when users log out
+4. Tokens should be device-specific, not shared
+5. Regularly clean up inactive or expired tokens
+</Warning>
+
+## Rate Limits
+
+Device token registration endpoints have no strict rate limits, but excessive requests may be throttled:
+
+- Recommended: Register once per login session
+- Maximum: 100 requests per minute per user
+
+## Related Endpoints
+
+- [Send Notification](/api/notifications/send) - Send push notifications

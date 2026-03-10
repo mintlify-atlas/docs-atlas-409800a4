@@ -1,0 +1,290 @@
+---
+title: Gateway API
+description: YARP reverse proxy for routing requests to backend services
+---
+
+## Overview
+
+The Gateway API serves as the entry point for all client requests in the Masar Eagle platform. Built using **YARP (Yet Another Reverse Proxy)**, it routes incoming requests to the appropriate backend microservices based on configured routes.
+
+<Info>
+  Gateway location: `src/services/Gateway.Api/Program.cs`
+</Info>
+
+## Core Responsibilities
+
+- **Request Routing**: Routes API requests to Identity, Users, Trips, and Notifications services
+- **Load Balancing**: Distributes traffic using service discovery
+- **Header Forwarding**: Manages `X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Host` headers
+- **Authentication**: Validates JWT tokens before forwarding requests
+- **CORS Management**: Handles cross-origin requests
+- **File Upload Support**: Configured for large file uploads with no body size limit
+
+## Configuration
+
+### Program.cs Setup
+
+The Gateway is configured in `Program.cs` with the following key features:
+
+```csharp Program.cs
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// Remove body size limits for file uploads
+builder.WebHost.ConfigureKestrel(options => 
+    options.Limits.MaxRequestBodySize = null);
+
+// Configure form options for large files
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = long.MaxValue;
+    options.ValueLengthLimit = int.MaxValue;
+});
+
+// Add authentication
+builder.Services.AddAppAuthentication(builder.Configuration);
+
+// Configure CORS - allow all origins
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader()));
+
+// Configure reverse proxy with service discovery
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
+    .AddServiceDiscoveryDestinationResolver()
+    .AddTransforms(context => 
+        context.AddXForwarded(ForwardedTransformActions.Set));
+```
+
+### Middleware Pipeline
+
+```csharp
+app.UseForwardedHeaders();
+app.UseCors();
+app.UseRequestResponseLogging();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapReverseProxy();
+```
+
+## Route Configuration
+
+Routes are defined in `appsettings.json` under the `ReverseProxy` section.
+
+### Backend Clusters
+
+The Gateway routes to four backend services:
+
+```json appsettings.json
+"Clusters": {
+  "users-cluster": {
+    "Destinations": {
+      "destination1": {
+        "Address": "http://user:8080"
+      }
+    }
+  },
+  "trips-cluster": {
+    "Destinations": {
+      "destination1": {
+        "Address": "http://trip:8080"
+      }
+    }
+  },
+  "notifications-cluster": {
+    "Destinations": {
+      "destination1": {
+        "Address": "http://notifications:8080"
+      }
+    }
+  },
+  "identity-cluster": {
+    "Destinations": {
+      "destination1": {
+        "Address": "http://identity:8080"
+      }
+    }
+  }
+}
+```
+
+### Sample Routes
+
+<Tabs>
+  <Tab title="Identity Routes">
+    ```json
+    "connect-route": {
+      "ClusterId": "identity-cluster",
+      "Match": {
+        "Path": "/connect/{**catch-all}"
+      }
+    },
+    "auth-route": {
+      "ClusterId": "identity-cluster",
+      "Match": {
+        "Path": "/api/auth/{**catch-all}"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Users Routes">
+    ```json
+    "drivers-catchall": {
+      "ClusterId": "users-cluster",
+      "Match": {
+        "Path": "/api/drivers/{**catch-all}"
+      }
+    },
+    "passengers-catchall": {
+      "ClusterId": "users-cluster",
+      "Match": {
+        "Path": "/api/passengers/{**catch-all}"
+      }
+    },
+    "admin-companies": {
+      "ClusterId": "users-cluster",
+      "Match": {
+        "Path": "/api/admin/companies/{**catch-all}"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Trips Routes">
+    ```json
+    "trips-catchall": {
+      "ClusterId": "trips-cluster",
+      "Match": {
+        "Path": "/api/trips/{**catch-all}"
+      }
+    },
+    "bookings-catchall": {
+      "ClusterId": "trips-cluster",
+      "Match": {
+        "Path": "/api/bookings/{**catch-all}"
+      }
+    },
+    "admin-trips-catchall": {
+      "ClusterId": "trips-cluster",
+      "Match": {
+        "Path": "/api/admin/trips/{**catch-all}"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Notifications Routes">
+    ```json
+    "notifications-catchall": {
+      "ClusterId": "notifications-cluster",
+      "Match": {
+        "Path": "/api/notifications/{**catch-all}"
+      }
+    },
+    "devices-catchall": {
+      "ClusterId": "notifications-cluster",
+      "Match": {
+        "Path": "/api/devices/{**catch-all}"
+      }
+    },
+    "device-tokens-catchall": {
+      "ClusterId": "notifications-cluster",
+      "Match": {
+        "Path": "/api/device-tokens/{**catch-all}"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Request/Response Logging
+
+The Gateway includes request/response logging middleware:
+
+```json appsettings.json
+"RequestResponse": {
+  "LogRequests": true,
+  "LogResponses": true,
+  "LogRequestBody": false,
+  "LogResponseBody": false,
+  "MaxBodySize": 1024,
+  "ExcludedPaths": ["/health", "/metrics", "/ready", "/live"],
+  "ExcludedHeaders": ["Authorization", "Cookie", "X-Api-Key"],
+  "RequestLogLevel": "Information",
+  "ResponseLogLevel": "Information",
+  "ErrorLogLevel": "Error"
+}
+```
+
+<Warning>
+  Sensitive headers like `Authorization` and `Cookie` are excluded from logs to prevent credential leakage.
+</Warning>
+
+## File Upload Support
+
+The Gateway is configured to handle file uploads of unlimited size:
+
+- **MaxRequestBodySize**: `null` (unlimited)
+- **MultipartBodyLengthLimit**: `long.MaxValue`
+- **ValueLengthLimit**: `int.MaxValue`
+
+This enables the Users service to receive driver documents and profile images through the Gateway.
+
+## Health Checks
+
+The Gateway exposes default endpoints for monitoring:
+
+- `/health` - Overall health status
+- `/live` - Liveness probe
+- `/ready` - Readiness probe
+
+## Service Discovery
+
+The Gateway uses **AddServiceDiscoveryDestinationResolver()** to dynamically resolve backend service locations in containerized environments. This allows the Gateway to work with orchestrators like Kubernetes or Docker Compose.
+
+## Security
+
+### Authentication
+
+The Gateway validates JWT tokens issued by the Identity service:
+
+```csharp
+builder.Services.AddAppAuthentication(builder.Configuration);
+```
+
+Authenticated requests include the user's claims which are forwarded to backend services.
+
+### Forwarded Headers
+
+The Gateway properly handles proxy headers:
+
+```csharp
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | 
+                               ForwardedHeaders.XForwardedProto | 
+                               ForwardedHeaders.XForwardedHost;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+```
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Identity Service" icon="key" href="/services/identity">
+    Handles authentication and token issuance
+  </Card>
+  <Card title="Users Service" icon="users" href="/services/users">
+    Manages drivers, passengers, and companies
+  </Card>
+  <Card title="Trips Service" icon="car" href="/services/trips">
+    Handles trip bookings and payments
+  </Card>
+  <Card title="Notifications Service" icon="bell" href="/services/notifications">
+    Sends push notifications
+  </Card>
+</CardGroup>

@@ -1,0 +1,272 @@
+---
+title: 'API Overview'
+description: 'Introduction to the Masar Eagle REST API'
+icon: 'compass'
+---
+
+## Introduction
+
+The Masar Eagle API is a RESTful API that provides access to all platform functionality for ride-hailing operations. The API is designed with a microservices architecture and uses a gateway pattern to route requests to the appropriate services.
+
+## Base URLs
+
+All API requests are routed through the API Gateway:
+
+<CodeGroup>
+```text Production
+https://api.masareagle.com
+```
+
+```text Development
+http://localhost:8080
+```
+</CodeGroup>
+
+The gateway routes requests to the following internal services:
+
+- **Identity Service** - Authentication and OTP management (`http://identity:8080`)
+- **Users Service** - User profiles, drivers, passengers, companies (`http://user:8080`)
+- **Trips Service** - Trip management, bookings, wallets (`http://trip:8080`)
+- **Notifications Service** - Push notifications and device management (`http://notifications:8080`)
+
+## API Architecture
+
+The API uses YARP (Yet Another Reverse Proxy) to route requests based on path patterns:
+
+### Route Pattern Examples
+
+<CodeGroup>
+```text Authentication
+POST /connect/token
+POST /api/auth/send-otp
+POST /api/auth/resend-otp
+```
+
+```text Users & Drivers
+GET /api/drivers/{driverId}
+PATCH /api/drivers/{driverId}
+GET /api/passengers/{passengerId}
+```
+
+```text Trips & Bookings
+POST /api/bookings
+GET /api/trips/{tripId}
+POST /api/drivers/{driverId}/trips
+```
+
+```text Admin Operations
+GET /api/admin/trips
+GET /api/admin/drivers
+POST /api/admin/companies
+```
+</CodeGroup>
+
+## API Versioning
+
+The API currently uses **path-based versioning** for specific endpoints:
+
+- **v1**: `/api/v1/trips/*` - Legacy trip endpoints (maintained for backward compatibility)
+- **Unversioned**: Most endpoints use unversioned paths as the current stable version
+
+Future versions will be introduced with new path prefixes (e.g., `/api/v2/`) when breaking changes are necessary.
+
+<Note>
+Unversioned endpoints represent the current stable API. Versioned endpoints (v1) are maintained for backward compatibility but may be deprecated in future releases.
+</Note>
+
+## Request Format
+
+### Content Types
+
+The API accepts the following content types:
+
+- `application/json` - For most API requests
+- `multipart/form-data` - For file uploads (images, documents)
+- `application/x-www-form-urlencoded` - For OAuth token requests
+
+### Headers
+
+<ParamField header="Content-Type" type="string" required>
+  The content type of the request body. Typically `application/json`.
+</ParamField>
+
+<ParamField header="Authorization" type="string" required>
+  Bearer token for authenticated requests: `Bearer {access_token}`
+</ParamField>
+
+<ParamField header="Accept-Language" type="string">
+  Preferred language for error messages. Supports `ar` (Arabic) and `en` (English). Default: `ar`
+</ParamField>
+
+### JSON Serialization
+
+The API uses the following JSON conventions:
+
+- **Property naming**: camelCase (e.g., `phoneNumber`, `userId`)
+- **Date/Time format**: ISO 8601 UTC timestamps (e.g., `2024-03-10T14:30:00.000Z`)
+- **Enums**: String values (e.g., `"admin"`, `"driver"`, `"passenger"`)
+- **Case insensitivity**: Request property names are case-insensitive
+
+<CodeGroup>
+```json Example Request
+{
+  "phoneNumber": "+966501234567",
+  "userType": "driver",
+  "timestamp": "2024-03-10T14:30:00.000Z"
+}
+```
+</CodeGroup>
+
+## Response Format
+
+### Success Responses
+
+Successful responses return the requested data with appropriate HTTP status codes:
+
+<CodeGroup>
+```json 200 OK - Resource Retrieved
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "phoneNumber": "+966501234567",
+  "userType": "driver",
+  "createdAt": "2024-03-10T14:30:00.000Z"
+}
+```
+
+```json 201 Created - Resource Created
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "message": "Driver created successfully",
+  "createdAt": "2024-03-10T14:30:00.000Z"
+}
+```
+
+```json 204 No Content - Success with No Body
+// Empty response body
+```
+</CodeGroup>
+
+### HTTP Status Codes
+
+The API uses standard HTTP status codes:
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 200 | OK | Request succeeded |
+| 201 | Created | Resource successfully created |
+| 204 | No Content | Request succeeded with no response body |
+| 400 | Bad Request | Invalid request data or validation error |
+| 401 | Unauthorized | Authentication required or invalid token |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource not found |
+| 409 | Conflict | Resource conflict (duplicate, etc.) |
+| 500 | Internal Server Error | Server error |
+| 502 | Bad Gateway | Error connecting to backend service |
+| 504 | Gateway Timeout | Request timeout |
+
+## File Uploads
+
+File upload endpoints support multipart/form-data with the following limits:
+
+<CardGroup cols={2}>
+  <Card title="Max Request Size" icon="upload">
+    Unlimited (configured via Kestrel)
+  </Card>
+  <Card title="Supported Formats" icon="image">
+    Images: JPEG, PNG, WebP, GIF
+  </Card>
+</CardGroup>
+
+### Upload Example
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.masareagle.com/api/drivers/me/profile-image \
+  -H "Authorization: Bearer {access_token}" \
+  -F "image=@/path/to/image.jpg"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('image', fileInput.files[0]);
+
+fetch('https://api.masareagle.com/api/drivers/me/profile-image', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+```
+</CodeGroup>
+
+## Cross-Origin Resource Sharing (CORS)
+
+The API supports CORS with the following configuration:
+
+- **Allowed Origins**: All origins (`*`)
+- **Allowed Methods**: All methods (GET, POST, PUT, PATCH, DELETE, etc.)
+- **Allowed Headers**: All headers
+- **Credentials**: Not supported (use Authorization header instead)
+
+<Warning>
+In production, CORS should be configured to allow only trusted origins for security.
+</Warning>
+
+## Request/Response Logging
+
+The gateway logs all requests and responses for monitoring and debugging:
+
+### Logged Information
+
+- Request path, method, and headers (excluding sensitive headers)
+- Response status code and headers
+- Request/response timestamps and duration
+- User ID and trace ID for correlation
+
+### Excluded from Logs
+
+- Authorization tokens
+- Cookies
+- API keys
+- Request/response bodies (configurable)
+- Health check endpoints (`/health`, `/metrics`, `/ready`, `/live`)
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Response Times" icon="gauge">
+    Typical response times: 50-200ms
+    
+    Timeouts: 30 seconds (configurable)
+  </Card>
+  <Card title="Request Limits" icon="shield">
+    No global rate limits currently enforced
+    
+    Service-level limits may apply
+  </Card>
+</CardGroup>
+
+## OpenAPI/Swagger Documentation
+
+Interactive API documentation is available for each service:
+
+- **Identity Service**: `http://identity:8080/swagger`
+- **Users Service**: `http://user:8080/swagger`
+- **Trips Service**: `http://trip:8080/swagger`
+- **Notifications Service**: `http://notifications:8080/swagger`
+
+<Note>
+Swagger endpoints are typically available only in development environments.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Learn how to authenticate and obtain access tokens
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/api/error-handling">
+    Understand error responses and how to handle them
+  </Card>
+</CardGroup>

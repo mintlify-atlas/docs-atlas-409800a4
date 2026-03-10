@@ -1,0 +1,479 @@
+---
+title: 'Passengers'
+description: 'Manage passenger profiles and account information in Masar Eagle'
+icon: 'user'
+---
+
+## Overview
+
+The Passengers API provides endpoints for managing passenger profiles, account information, and administrative operations. Passengers can view and update their profiles, while admins have access to list and manage all passenger accounts.
+
+## Authentication
+
+All endpoints require authentication. Include the JWT token in the Authorization header:
+
+```bash
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+---
+
+## Get Passenger Profile
+
+<api-endpoint method="GET" endpoint="/api/passengers/profile" />
+
+Get the current authenticated passenger's profile information.
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Passenger unique identifier
+</ResponseField>
+
+<ResponseField name="PhoneNumber" type="string">
+  Passenger's phone number
+</ResponseField>
+
+<ResponseField name="FullName" type="string" nullable>
+  Passenger's full name
+</ResponseField>
+
+<ResponseField name="DateOfBirth" type="date" nullable>
+  Date of birth (YYYY-MM-DD format)
+</ResponseField>
+
+<ResponseField name="Gender" type="string">
+  Gender: `NotSpecified`, `Male`, `Female`
+</ResponseField>
+
+<ResponseField name="ProfilePictureUrl" type="string" nullable>
+  URL to profile picture
+</ResponseField>
+
+<ResponseField name="IsPhoneVerified" type="boolean">
+  Whether phone number is verified
+</ResponseField>
+
+<ResponseField name="IsProfileComplete" type="boolean">
+  Whether profile is complete
+</ResponseField>
+
+<ResponseField name="IsActive" type="boolean">
+  Whether account is active
+</ResponseField>
+
+<ResponseField name="LastLoginAt" type="datetime" nullable>
+  Last login timestamp
+</ResponseField>
+
+<ResponseField name="OverallRating" type="decimal">
+  Average rating from drivers
+</ResponseField>
+
+<ResponseField name="TotalReviewsCount" type="integer">
+  Total number of reviews received
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/passengers/profile" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "Id": "p_789012",
+  "PhoneNumber": "+966501234567",
+  "FullName": "فاطمة أحمد",
+  "DateOfBirth": "1995-03-20",
+  "Gender": "Female",
+  "ProfilePictureUrl": "/uploads/passengers/p_789012/profile.jpg",
+  "IsPhoneVerified": true,
+  "IsProfileComplete": true,
+  "IsActive": true,
+  "LastLoginAt": "2024-03-10T14:30:00Z",
+  "OverallRating": 4.8,
+  "TotalReviewsCount": 45
+}
+```
+
+---
+
+## Complete/Update Passenger Profile
+
+<api-endpoint method="PUT" endpoint="/api/passengers/profile/complete-and-update/{passengerId}" />
+
+Complete or update passenger profile information including name, date of birth, and gender.
+
+### Path Parameters
+
+<ParamField path="passengerId" type="string" required>
+  Passenger unique identifier
+</ParamField>
+
+### Request Body
+
+<ParamField body="FullName" type="string" required>
+  Passenger's full name (2-100 characters)
+</ParamField>
+
+<ParamField body="DateOfBirth" type="date" optional>
+  Date of birth in YYYY-MM-DD format (passenger must be 13+ years old)
+</ParamField>
+
+<ParamField body="Gender" type="string" default="NotSpecified">
+  Gender: `NotSpecified`, `Male`, `Female`
+</ParamField>
+
+### Response
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="IsProfileComplete" type="boolean">
+  Profile completion status
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/passengers/profile/complete-and-update/p_789012" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "FullName": "فاطمة أحمد محمد",
+    "DateOfBirth": "1995-03-20",
+    "Gender": "Female"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "Message": "تم تحديث الملف الشخصي بنجاح",
+  "IsProfileComplete": true
+}
+```
+
+---
+
+## List All Passengers (Admin)
+
+<api-endpoint method="GET" endpoint="/api/admin/passengers" />
+
+Retrieve a paginated list of all passengers with filtering options. **Admin only**.
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Number of items per page (max 100)
+</ParamField>
+
+<ParamField query="SearchTerm" type="string" optional>
+  Search by phone number or full name
+</ParamField>
+
+<ParamField query="IsActive" type="boolean" optional>
+  Filter by active status
+</ParamField>
+
+<ParamField query="IsProfileComplete" type="boolean" optional>
+  Filter by profile completion status
+</ParamField>
+
+<ParamField query="IsPhoneVerified" type="boolean" optional>
+  Filter by phone verification status
+</ParamField>
+
+### Response
+
+<ResponseField name="Passengers" type="array">
+  List of passenger summaries
+  <expandable>
+    <ResponseField name="Id" type="string">
+      Passenger unique identifier
+    </ResponseField>
+    <ResponseField name="PhoneNumber" type="string">
+      Phone number
+    </ResponseField>
+    <ResponseField name="FullName" type="string" nullable>
+      Full name
+    </ResponseField>
+    <ResponseField name="ProfilePictureUrl" type="string" nullable>
+      Profile picture URL
+    </ResponseField>
+    <ResponseField name="IsPhoneVerified" type="boolean">
+      Phone verification status
+    </ResponseField>
+    <ResponseField name="IsProfileComplete" type="boolean">
+      Profile completion status
+    </ResponseField>
+    <ResponseField name="IsActive" type="boolean">
+      Active status
+    </ResponseField>
+    <ResponseField name="OverallRating" type="decimal">
+      Average rating
+    </ResponseField>
+    <ResponseField name="TotalReviewsCount" type="integer">
+      Total reviews
+    </ResponseField>
+    <ResponseField name="CreatedAt" type="datetime">
+      Account creation timestamp
+    </ResponseField>
+    <ResponseField name="LastLoginAt" type="datetime" nullable>
+      Last login timestamp
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="TotalCount" type="integer">
+  Total number of passengers
+</ResponseField>
+
+<ResponseField name="Page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="PageSize" type="integer">
+  Items per page
+</ResponseField>
+
+<ResponseField name="TotalPages" type="integer">
+  Total number of pages
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/passengers?Page=1&PageSize=20&IsActive=true" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Get Passenger by ID (Admin)
+
+<api-endpoint method="GET" endpoint="/api/admin/passengers/{passengerId}" />
+
+Retrieve detailed information about a specific passenger. **Public endpoint** (useful for viewing trip history with deleted passengers).
+
+### Path Parameters
+
+<ParamField path="passengerId" type="string" required>
+  Passenger unique identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="includeDeleted" type="boolean" optional>
+  Include soft-deleted passenger data (useful for trip history)
+</ParamField>
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Passenger unique identifier
+</ResponseField>
+
+<ResponseField name="PhoneNumber" type="string">
+  Phone number
+</ResponseField>
+
+<ResponseField name="FullName" type="string" nullable>
+  Full name
+</ResponseField>
+
+<ResponseField name="DateOfBirth" type="date" nullable>
+  Date of birth
+</ResponseField>
+
+<ResponseField name="Gender" type="string">
+  Gender
+</ResponseField>
+
+<ResponseField name="ProfilePictureUrl" type="string" nullable>
+  Profile picture URL
+</ResponseField>
+
+<ResponseField name="IsPhoneVerified" type="boolean">
+  Phone verification status
+</ResponseField>
+
+<ResponseField name="IsProfileComplete" type="boolean">
+  Profile completion status
+</ResponseField>
+
+<ResponseField name="IsActive" type="boolean">
+  Active status
+</ResponseField>
+
+<ResponseField name="OverallRating" type="decimal">
+  Average rating
+</ResponseField>
+
+<ResponseField name="TotalReviewsCount" type="integer">
+  Total reviews
+</ResponseField>
+
+<ResponseField name="CreatedAt" type="datetime">
+  Account creation date
+</ResponseField>
+
+<ResponseField name="LastLoginAt" type="datetime" nullable>
+  Last login timestamp
+</ResponseField>
+
+<ResponseField name="IsDeleted" type="boolean">
+  Soft delete status
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/passengers/p_789012?includeDeleted=true" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Update Passenger Status
+
+<api-endpoint method="PUT" endpoint="/api/passengers/{passengerId}/status" />
+
+Update passenger active/inactive status.
+
+### Path Parameters
+
+<ParamField path="passengerId" type="string" required>
+  Passenger unique identifier
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="IsActive" type="boolean" required>
+  Set passenger active status (true/false)
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/passengers/p_789012/status?IsActive=true" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Delete Passenger (Admin)
+
+<api-endpoint method="DELETE" endpoint="/api/admin/passengers/{passengerId}" />
+
+Soft delete a passenger account. Sets `IsDeleted=true` and `IsActive=false`. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="passengerId" type="string" required>
+  Passenger unique identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="Message" type="string">
+  Success message confirming deletion
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/admin/passengers/p_789012" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "Message": "تم حذف الراكب بنجاح"
+}
+```
+
+---
+
+## Upload Profile Picture
+
+<api-endpoint method="POST" endpoint="/api/passengers/profile-picture" />
+
+Upload or update passenger profile picture.
+
+### Request Body (Form Data)
+
+<ParamField body="ProfilePicture" type="file" required>
+  Image file (JPEG, PNG - max 5MB)
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/passengers/profile-picture" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "ProfilePicture=@profile.jpg"
+```
+
+---
+
+## Delete Profile Picture
+
+<api-endpoint method="DELETE" endpoint="/api/passengers/profile-picture" />
+
+Delete passenger profile picture.
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/passengers/profile-picture" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Error Responses
+
+All endpoints may return the following error responses:
+
+<ResponseField name="message" type="string">
+  Error message in Arabic or English
+</ResponseField>
+
+<ResponseField name="errors" type="array" optional>
+  Detailed validation errors (when applicable)
+</ResponseField>
+
+### Common Error Codes
+
+- `400 Bad Request` - Invalid request parameters or validation errors
+- `401 Unauthorized` - Missing or invalid authentication token
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Passenger not found
+- `500 Internal Server Error` - Server error
+
+### Example Error Response
+
+```json
+{
+  "message": "فشل التحقق من صحة البيانات",
+  "errors": [
+    {
+      "field": "FullName",
+      "message": "الاسم الكامل مطلوب"
+    }
+  ]
+}
+```

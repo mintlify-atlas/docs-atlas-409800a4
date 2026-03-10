@@ -1,0 +1,756 @@
+---
+title: Configuration
+description: Environment variables, application settings, and configuration options
+icon: gear
+---
+
+## Overview
+
+Masar Eagle uses a combination of `appsettings.json` files and environment variables for configuration. This guide covers all configuration options for each service.
+
+<Note>
+  Configuration follows the .NET configuration hierarchy: Environment Variables > appsettings.{Environment}.json > appsettings.json
+</Note>
+
+## Configuration Structure
+
+Each service has its own configuration in its `appsettings.json` file:
+
+```
+src/
+├── services/
+│   ├── Users/Users.Api/appsettings.json
+│   ├── Trips/Trips.Api/appsettings.json
+│   ├── Notifications/Notifications.Api/appsettings.json
+│   ├── Identity/src/Identity.Web/appsettings.json
+│   └── Gateway.Api/appsettings.json
+└── aspire/AppHost/appsettings.json
+```
+
+## Global Configuration
+
+### Logging Configuration
+
+All services use consistent logging configuration:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore": "Warning",
+      "System.Net.Http.HttpClient": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  }
+}
+```
+
+<Tabs>
+  <Tab title="Environment Variable">
+    ```bash
+    # Override log level
+    export Logging__LogLevel__Default=Debug
+    export Logging__LogLevel__Microsoft.AspNetCore=Information
+    ```
+  </Tab>
+  
+  <Tab title="Docker Compose">
+    ```yaml
+    environment:
+      - Logging__LogLevel__Default=Debug
+      - Logging__LogLevel__Microsoft.AspNetCore=Information
+    ```
+  </Tab>
+</Tabs>
+
+### OpenTelemetry Configuration
+
+All services send telemetry to the OpenTelemetry Collector:
+
+```bash
+# Configured in AppHost.cs for each service
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_SERVICE_NAME=<service-name>
+```
+
+<AccordionGroup>
+  <Accordion title="Service Names">
+    - `user` - Users Service
+    - `trip` - Trips Service
+    - `notifications` - Notifications Service
+    - `identity` - Identity Service
+    - `gateway` - API Gateway
+  </Accordion>
+  
+  <Accordion title="Collector Configuration">
+    The OpenTelemetry Collector forwards to:
+    - **Prometheus**: http://prometheus:9090/api/v1/otlp
+    - **Jaeger**: http://jaeger:4317
+    - **Loki**: http://loki:3100/otlp
+  </Accordion>
+</AccordionGroup>
+
+## Service-Specific Configuration
+
+### Identity Service
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Jwt": {
+    "SecretKey": "super-secret-key-for-development-only-change-in-production-masar-eagle-2024",
+    "Issuer": "masareagle.identity",
+    "Audience": "masar-eagle-api",
+    "AccessTokenExpiryMinutes": 60
+  },
+  "Sms": {
+    "Provider": "InMemory",
+    "OtpExpiryMinutes": 5,
+    "OtpLength": 6,
+    "MaxOtpAttempts": 5,
+    "MaxResendAttempts": 3,
+    "ResendCooldownMinutes": 1,
+    "ResendWindowMinutes": 30
+  },
+  "Taqnyat": {
+    "BearerToken": "",
+    "SenderName": "",
+    "BaseUrl": "https://api.taqnyat.sa/v1"
+  }
+}
+```
+
+```bash Environment Variables
+# JWT Configuration
+export Jwt__SecretKey="your-production-secret-key-min-64-chars"
+export Jwt__Issuer="masareagle.identity"
+export Jwt__Audience="masar-eagle-api"
+export Jwt__AccessTokenExpiryMinutes=60
+
+# SMS Provider (InMemory, Mock, or Taqnyat)
+export Sms__Provider="Taqnyat"
+export Taqnyat__BearerToken="your-taqnyat-api-key"
+export Taqnyat__SenderName="MasarEagle"
+
+# Identity Keys Path (for OpenIddict)
+export IDENTITY_KEYS_PATH="/keys"
+```
+</CodeGroup>
+
+<Warning>
+  **Security Critical**: Change the `Jwt:SecretKey` in production! It must be at least 64 characters for HS512 algorithm.
+</Warning>
+
+#### JWT Configuration Options
+
+| Setting | Description | Default | Required |
+|---------|-------------|---------|----------|
+| `SecretKey` | HMAC signing key | Development key | Yes |
+| `Issuer` | Token issuer | masareagle.identity | Yes |
+| `Audience` | Token audience | masar-eagle-api | Yes |
+| `AccessTokenExpiryMinutes` | Token lifetime | 60 | Yes |
+
+#### SMS Configuration Options
+
+| Setting | Description | Options |
+|---------|-------------|---------|
+| `Provider` | SMS provider | `InMemory`, `Mock`, `Taqnyat` |
+| `OtpExpiryMinutes` | OTP validity period | Default: 5 |
+| `OtpLength` | OTP code length | Default: 6 |
+| `MaxOtpAttempts` | Max verification attempts | Default: 5 |
+| `MaxResendAttempts` | Max resend attempts | Default: 3 |
+| `ResendCooldownMinutes` | Time between resends | Default: 1 |
+
+### Users Service
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Sms": {
+    "Provider": "Mock",
+    "OtpExpiryMinutes": 5,
+    "OtpLength": 6,
+    "MaxOtpAttempts": 3,
+    "MaxResendAttempts": 3,
+    "ResendCooldownMinutes": 1,
+    "ResendWindowMinutes": 60
+  },
+  "FileStorage": {
+    "Provider": "Local",
+    "UseAbsolutePath": true,
+    "MaxFileSizeMB": 2147483647,
+    "AllowedExtensions": [".jpg", ".jpeg", ".png", ".webp"],
+    "EnableImageResizing": true,
+    "MaxImageWidth": 1920,
+    "MaxImageHeight": 1080,
+    "ThumbnailWidth": 300,
+    "ThumbnailHeight": 200
+  },
+  "AppVersion": {
+    "Captain": {
+      "Android": { "Current": 26, "Latest": 26 },
+      "Ios": { "Current": 26, "Latest": 26 }
+    },
+    "Passenger": {
+      "Android": { "Current": 20, "Latest": 20 },
+      "Ios": { "Current": 20, "Latest": 20 }
+    }
+  },
+  "EmailConfiguration": {
+    "ApiToken": "re_your_resend_api_token",
+    "From": "onboarding@masar-eagle.com",
+    "DisplayName": "مسار إيجل",
+    "CompanyPortalUrl": "https://portal.masar-eagle.com",
+    "LogoUrl": "https://prod.api.masar-eagle.com/uploads/logos/logo.png"
+  }
+}
+```
+
+```bash Environment Variables
+# File Storage
+export FileStorage__Provider="Local"
+export FileStorage__MaxFileSizeMB=10
+export FileStorage__AllowedExtensions__0=".jpg"
+export FileStorage__AllowedExtensions__1=".jpeg"
+export FileStorage__AllowedExtensions__2=".png"
+export FileStorage__AllowedExtensions__3=".webp"
+
+# Image Processing
+export FileStorage__EnableImageResizing=true
+export FileStorage__MaxImageWidth=1920
+export FileStorage__MaxImageHeight=1080
+
+# Email (Resend)
+export EmailConfiguration__ApiToken="re_your_token"
+export EmailConfiguration__From="noreply@yourdomain.com"
+
+# App Version Control
+export AppVersion__Captain__Android__Latest=26
+export AppVersion__Passenger__Android__Latest=20
+```
+</CodeGroup>
+
+#### File Storage Options
+
+<Tabs>
+  <Tab title="Local Storage">
+    ```json
+    {
+      "FileStorage": {
+        "Provider": "Local",
+        "UseAbsolutePath": true,
+        "BasePath": "/app/uploads"
+      }
+    }
+    ```
+    
+    Files are stored on the container filesystem. Use volumes for persistence.
+  </Tab>
+  
+  <Tab title="Cloud Storage">
+    ```json
+    {
+      "FileStorage": {
+        "Provider": "S3",
+        "BucketName": "masar-eagle-uploads",
+        "Region": "us-east-1",
+        "AccessKey": "your-access-key",
+        "SecretKey": "your-secret-key"
+      }
+    }
+    ```
+    
+    <Note>Cloud storage providers require additional configuration.</Note>
+  </Tab>
+</Tabs>
+
+### Trips Service
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Hangfire": {
+    "DashboardEnabled": true,
+    "DashboardPath": "/hangfire"
+  },
+  "TripReminder": {
+    "ReminderTimeWindowMinutes": 60,
+    "CronExpression": "*/5 * * * *",
+    "BatchSize": 50,
+    "EnableReminders": true
+  },
+  "AutoCancelOverdueTrips": {
+    "EnableAutoCancel": true,
+    "GracePeriodHours": 5,
+    "CronExpression": "*/10 * * * *",
+    "BatchSize": 50
+  },
+  "MoyasarPassenger": {
+    "SecretKey": "sk_test_xxx",
+    "PublishableKey": "pk_test_xxx",
+    "ApiUrl": "https://api.moyasar.com/v1"
+  },
+  "MoyasarDriver": {
+    "SecretKey": "sk_test_xxx",
+    "PublishableKey": "pk_test_xxx",
+    "ApiUrl": "https://api.moyasar.com/v1"
+  },
+  "MoyasarCompany": {
+    "SecretKey": "sk_test_xxx",
+    "PublishableKey": "pk_test_xxx",
+    "ApiUrl": "https://api.moyasar.com/v1"
+  }
+}
+```
+
+```bash Environment Variables
+# Hangfire Background Jobs
+export Hangfire__DashboardEnabled=true
+export Hangfire__DashboardPath="/hangfire"
+
+# Trip Reminders
+export TripReminder__EnableReminders=true
+export TripReminder__ReminderTimeWindowMinutes=60
+export TripReminder__CronExpression="*/5 * * * *"
+
+# Auto-Cancel Configuration
+export AutoCancelOverdueTrips__EnableAutoCancel=true
+export AutoCancelOverdueTrips__GracePeriodHours=5
+
+# Payment Gateway (Moyasar)
+export MoyasarPassenger__SecretKey="sk_live_xxx"
+export MoyasarPassenger__PublishableKey="pk_live_xxx"
+export MoyasarDriver__SecretKey="sk_live_xxx"
+export MoyasarCompany__SecretKey="sk_live_xxx"
+```
+</CodeGroup>
+
+<Warning>
+  Replace test Moyasar keys with production keys before deploying!
+</Warning>
+
+#### Background Job Configuration
+
+| Job | Cron Expression | Description |
+|-----|----------------|-------------|
+| Trip Reminders | `*/5 * * * *` | Send reminders 60min before trip |
+| Auto-Cancel | `*/10 * * * *` | Cancel trips 5h past scheduled time |
+
+### Notifications Service
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Firebase": {
+    "ProjectId": "masar-eagle-notifications",
+    "ServiceAccount": {
+      "Type": "service_account",
+      "ProjectId": "masar-eagle-notifications",
+      "PrivateKeyId": "...",
+      "PrivateKey": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+      "ClientEmail": "firebase-adminsdk@project.iam.gserviceaccount.com",
+      "ClientId": "...",
+      "AuthUri": "https://accounts.google.com/o/oauth2/auth",
+      "TokenUri": "https://oauth2.googleapis.com/token"
+    }
+  }
+}
+```
+
+```bash Environment Variables
+# Firebase Cloud Messaging
+export Firebase__ProjectId="masar-eagle-notifications"
+export Firebase__ServiceAccount__ProjectId="masar-eagle-notifications"
+export Firebase__ServiceAccount__PrivateKeyId="your-key-id"
+export Firebase__ServiceAccount__PrivateKey="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+export Firebase__ServiceAccount__ClientEmail="firebase-adminsdk@project.iam.gserviceaccount.com"
+export Firebase__ServiceAccount__ClientId="your-client-id"
+```
+</CodeGroup>
+
+<Note>
+  Firebase configuration requires a service account JSON from the Firebase Console. Download it from Project Settings > Service Accounts.
+</Note>
+
+### Gateway Service
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Yarp": "Information",
+      "Gateway.Api": "Information"
+    },
+    "RequestResponse": {
+      "LogRequests": true,
+      "LogResponses": true,
+      "LogRequestBody": false,
+      "LogResponseBody": false,
+      "MaxBodySize": 1024,
+      "ExcludedPaths": ["/health", "/metrics", "/ready", "/live"],
+      "ExcludedHeaders": ["Authorization", "Cookie", "X-Api-Key"],
+      "RequestLogLevel": "Information",
+      "ResponseLogLevel": "Information",
+      "ErrorLogLevel": "Error"
+    }
+  },
+  "ReverseProxy": {
+    "Routes": { ... },
+    "Clusters": {
+      "users-cluster": {
+        "Destinations": {
+          "destination1": { "Address": "http://user:8080" }
+        }
+      },
+      "trips-cluster": {
+        "Destinations": {
+          "destination1": { "Address": "http://trip:8080" }
+        }
+      },
+      "notifications-cluster": {
+        "Destinations": {
+          "destination1": { "Address": "http://notifications:8080" }
+        }
+      },
+      "identity-cluster": {
+        "Destinations": {
+          "destination1": { "Address": "http://identity:8080" }
+        }
+      }
+    }
+  }
+}
+```
+
+```bash Environment Variables
+# YARP Logging
+export Logging__LogLevel__Yarp=Information
+
+# Request/Response Logging
+export Logging__RequestResponse__LogRequests=true
+export Logging__RequestResponse__LogRequestBody=false
+export Logging__RequestResponse__LogResponseBody=false
+
+# Cluster Configuration (for external deployments)
+export ReverseProxy__Clusters__users-cluster__Destinations__destination1__Address="http://user-service:8080"
+```
+</CodeGroup>
+
+<Note>
+  The gateway uses YARP (Yet Another Reverse Proxy) for routing. Service discovery is automatic when using .NET Aspire.
+</Note>
+
+## Database Configuration
+
+### Connection Strings
+
+Connection strings are automatically configured by .NET Aspire:
+
+```bash
+# Users Service
+ConnectionStrings__user="Host=postgres;Database=user;Username=postgres;Password=..."
+
+# Trips Service
+ConnectionStrings__trip="Host=postgres;Database=trip;Username=postgres;Password=..."
+
+# Notifications Service
+ConnectionStrings__notifications="Host=postgres;Database=notifications;Username=postgres;Password=..."
+
+# Identity Service
+ConnectionStrings__auth="Host=postgres;Database=auth;Username=postgres;Password=..."
+```
+
+<Tabs>
+  <Tab title="Aspire (Automatic)">
+    ```csharp AppHost.cs
+    var postgres = builder.AddPostgres("postgres")
+        .WithEnvironment("POSTGRES_HOST_AUTH_METHOD", "trust")
+        .WithDataVolume("masar-postgres-data");
+    
+    var usersDb = postgres.AddDatabase("user");
+    
+    builder.AddProject<User>("user")
+        .WithReference(usersDb);  // Connection string injected automatically
+    ```
+  </Tab>
+  
+  <Tab title="Manual Configuration">
+    ```bash
+    # Set connection strings manually
+    export ConnectionStrings__user="Host=localhost;Port=5432;Database=user;Username=postgres;Password=yourpassword"
+    ```
+  </Tab>
+</Tabs>
+
+### Migration Configuration
+
+Migrations run automatically on startup. To control migration behavior:
+
+```bash
+# Disable auto-migration (run manually)
+export Database__AutoMigrate=false
+
+# Migration timeout
+export Database__MigrationTimeoutSeconds=120
+```
+
+## Message Queue Configuration
+
+### RabbitMQ Connection
+
+```bash
+# Automatically configured by Aspire
+RabbitMQ__Host=rabbitmq
+RabbitMQ__Port=5672
+RabbitMQ__Username=guest
+RabbitMQ__Password=guest
+```
+
+<Tabs>
+  <Tab title="Aspire Configuration">
+    ```csharp AppHost.cs
+    var rabbitmq = builder.AddRabbitMQ("rabbitmq", username, password)
+        .WithDataVolume("rabbitmq-data")
+        .WithManagementPlugin();
+    
+    builder.AddProject<User>("user")
+        .WithReference(rabbitmq);  // Connection injected
+    ```
+  </Tab>
+  
+  <Tab title="Manual Configuration">
+    ```bash
+    export RabbitMQ__Host="rabbitmq.example.com"
+    export RabbitMQ__Port=5672
+    export RabbitMQ__Username="your-username"
+    export RabbitMQ__Password="your-password"
+    export RabbitMQ__VirtualHost="/"
+    ```
+  </Tab>
+</Tabs>
+
+### Wolverine Configuration
+
+Masar Eagle uses Wolverine for message handling:
+
+```bash
+# Wolverine settings (automatically configured)
+export Wolverine__RabbitMQ__ConnectionString="amqp://guest:guest@rabbitmq:5672"
+export Wolverine__MaxRetries=3
+export Wolverine__RetryDelaySeconds=5
+```
+
+## Environment-Specific Configuration
+
+### Development
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Development
+export DOTNET_ENVIRONMENT=Development
+
+# Use mock services
+export Sms__Provider=Mock
+export FileStorage__Provider=Local
+
+# Enable detailed logging
+export Logging__LogLevel__Default=Debug
+
+# Enable Swagger
+export Swagger__Enabled=true
+```
+
+### Staging
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Staging
+
+# Use staging services
+export Sms__Provider=Taqnyat
+export EmailConfiguration__ApiToken="re_staging_token"
+
+# Moderate logging
+export Logging__LogLevel__Default=Information
+
+# Test payment keys
+export MoyasarPassenger__SecretKey="sk_test_xxx"
+```
+
+### Production
+
+```bash
+export ASPNETCORE_ENVIRONMENT=Production
+
+# Production services
+export Sms__Provider=Taqnyat
+export Taqnyat__BearerToken="production-token"
+
+# Production secrets
+export Jwt__SecretKey="$(openssl rand -base64 64)"
+export MoyasarPassenger__SecretKey="sk_live_xxx"
+
+# Minimal logging
+export Logging__LogLevel__Default=Warning
+
+# Disable Swagger
+export Swagger__Enabled=false
+
+# Enable HTTPS
+export ASPNETCORE_URLS="https://+:443;http://+:80"
+```
+
+<Warning>
+  Never commit production secrets to version control. Use environment variables, Docker secrets, or a secrets manager.
+</Warning>
+
+## Secrets Management
+
+### Docker Secrets
+
+```yaml docker-compose.yml
+services:
+  identity:
+    secrets:
+      - jwt_secret
+      - db_password
+    environment:
+      - Jwt__SecretKey=/run/secrets/jwt_secret
+      - ConnectionStrings__auth=/run/secrets/db_password
+
+secrets:
+  jwt_secret:
+    external: true
+  db_password:
+    external: true
+```
+
+### Azure Key Vault
+
+```bash
+# Install Azure Key Vault package
+dotnet add package Azure.Extensions.AspNetCore.Configuration.Secrets
+
+# Configure in Program.cs
+builder.Configuration.AddAzureKeyVault(
+    new Uri("https://your-keyvault.vault.azure.net/"),
+    new DefaultAzureCredential());
+```
+
+### Kubernetes Secrets
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: masar-eagle-secrets
+type: Opaque
+data:
+  jwt-secret: <base64-encoded-secret>
+  db-password: <base64-encoded-password>
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: identity
+        env:
+        - name: Jwt__SecretKey
+          valueFrom:
+            secretKeyRef:
+              name: masar-eagle-secrets
+              key: jwt-secret
+```
+
+## Health Checks
+
+All services expose health check endpoints:
+
+```bash
+# Health check endpoint
+curl http://localhost:8080/health
+
+# Readiness check
+curl http://localhost:8080/health/ready
+
+# Liveness check
+curl http://localhost:8080/health/live
+```
+
+### Health Check Configuration
+
+```json
+{
+  "HealthChecks": {
+    "DatabaseHealthCheckTimeout": 5,
+    "RabbitMQHealthCheckTimeout": 5,
+    "DetailedErrors": false
+  }
+}
+```
+
+## Performance Tuning
+
+### Connection Pooling
+
+```bash
+# PostgreSQL connection pooling
+export ConnectionStrings__user="Host=postgres;Database=user;Pooling=true;MinPoolSize=10;MaxPoolSize=100"
+
+# HTTP client pooling
+export HttpClient__MaxConnectionsPerServer=50
+```
+
+### Caching
+
+```bash
+# Memory cache
+export MemoryCache__SizeLimit=100
+export MemoryCache__CompactionPercentage=0.25
+
+# Distributed cache (Redis)
+export Redis__Configuration="redis:6379"
+export Redis__InstanceName="MasarEagle:"
+```
+
+## Validation
+
+Validate your configuration:
+
+```bash
+#!/bin/bash
+
+# Check required environment variables
+REQUIRED_VARS=(
+    "ASPNETCORE_ENVIRONMENT"
+    "Jwt__SecretKey"
+    "ConnectionStrings__user"
+    "RabbitMQ__Host"
+)
+
+for var in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!var}" ]; then
+        echo "❌ Missing: $var"
+    else
+        echo "✅ Set: $var"
+    fi
+done
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Deployment" icon="docker" href="/setup/docker-deployment">
+    Deploy using Docker Compose
+  </Card>
+  
+  <Card title="Aspire Deployment" icon="cloud" href="/setup/aspire-deployment">
+    Deploy with .NET Aspire
+  </Card>
+</CardGroup>

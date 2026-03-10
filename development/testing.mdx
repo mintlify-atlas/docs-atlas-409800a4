@@ -1,0 +1,723 @@
+---
+title: Testing Strategy
+description: Testing approaches and patterns for Masar Eagle services
+---
+
+Masar Eagle follows a pragmatic testing strategy focused on integration tests and end-to-end testing, with unit tests for complex business logic.
+
+## Testing Philosophy
+
+<CardGroup cols={2}>
+  <Card title="Integration Over Unit" icon="plug">
+    Focus on testing complete workflows rather than individual units in isolation
+  </Card>
+  <Card title="Test Real Dependencies" icon="database">
+    Use real PostgreSQL, RabbitMQ, and Redis in tests via Docker
+  </Card>
+  <Card title="Fast Feedback" icon="bolt">
+    Keep test suites fast with parallel execution and test data cleanup
+  </Card>
+  <Card title="Reliable & Deterministic" icon="check">
+    Tests should produce consistent results and not depend on external state
+  </Card>
+</CardGroup>
+
+## Test Types
+
+### Integration Tests
+
+Test complete features through the HTTP API with real dependencies.
+
+**Characteristics:**
+- Use `WebApplicationFactory<Program>` to host the API
+- Real database (PostgreSQL in Docker)
+- Real message bus (RabbitMQ)
+- Actual authentication/authorization
+- Test entire request/response cycle
+
+**Example:**
+
+```csharp BookSeatIntegrationTests.cs
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Xunit;
+
+public class BookSeatIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+{
+    private readonly HttpClient _client;
+    private readonly AppDataConnection _db;
+
+    public BookSeatIntegrationTests(WebApplicationFactory<Program> factory)
+    {
+        _client = factory.CreateClient();
+        _db = factory.Services.GetRequiredService<AppDataConnection>();
+    }
+
+    [Fact]
+    public async Task BookSeat_WithValidRequest_CreatesBookingAndReservesSeats()
+    {
+        // Arrange
+        var trip = await CreateTestTripAsync(
+            from: "Riyadh", 
+            to: "Jeddah", 
+            totalSeats: 10, 
+            availableSeats: 10);
+        
+        var passenger = await CreateTestPassengerAsync();
+
+        var request = new BookSeatRequest
+        {
+            TripId = trip.Id,
+            PassengerId = passenger.Id,
+            RequestedSeatsCount = 2,
+            PaymentMethod = "Cash"
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/trips/{trip.Id}/book-seat", 
+            request);
+
+        // Assert
+        response.EnsureSuccessStatusCode();
+        
+        var result = await response.Content
+            .ReadFromJsonAsync<BookSeatResponse>();
+        
+        Assert.NotNull(result);
+        Assert.True(result.Success);
+        Assert.NotNull(result.BookingId);
+
+        // Verify database state
+        var booking = await _db.GetTable<Booking>()
+            .FirstOrDefaultAsync(b => b.Id == result.BookingId);
+        
+        Assert.NotNull(booking);
+        Assert.Equal(2, booking.RequestedSeatsCount);
+        Assert.Equal(BookingStatuses.Pending, booking.Status);
+
+        // Verify seat reservation
+        var updatedTrip = await _db.GetTable<Trip>()
+            .FirstOrDefaultAsync(t => t.Id == trip.Id);
+        
+        Assert.Equal(2, updatedTrip.ReservedSeatCount);
+    }
+
+    [Fact]
+    public async Task BookSeat_WhenNotEnoughSeats_ReturnsBadRequest()
+    {
+        // Arrange
+        var trip = await CreateTestTripAsync(
+            totalSeats: 5, 
+            availableSeats: 2);
+        
+        var request = new BookSeatRequest
+        {
+            TripId = trip.Id,
+            PassengerId = "passenger-123",
+            RequestedSeatsCount = 3  // More than available
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync(
+            $"/api/trips/{trip.Id}/book-seat", 
+            request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        
+        var result = await response.Content
+            .ReadFromJsonAsync<BookSeatResponse>();
+        
+        Assert.False(result.Success);
+        Assert.Contains("not enough available seats", 
+            result.Message, 
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<Trip> CreateTestTripAsync(
+        string from = "Riyadh",
+        string to = "Jeddah",
+        int totalSeats = 10,
+        int availableSeats = 10)
+    {
+        var trip = new Trip
+        {
+            Id = Guid.NewGuid().ToString(),
+            From = from,
+            To = to,
+            DepartureTimeUtc = DateTimeOffset.UtcNow.AddDays(1),
+            TotalSeats = totalSeats,
+            AvailableSeatCount = availableSeats,
+            ReservedSeatCount = 0,
+            Price = 100,
+            Status = TripStatuses.Scheduled,
+            DriverId = "driver-123",
+            VehicleId = "vehicle-123",
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        await _db.InsertAsync(trip);
+        return trip;
+    }
+}
+```
+
+### Unit Tests
+
+Test individual components in isolation with mocked dependencies.
+
+**Use for:**
+- Complex business logic
+- Validation rules
+- Utility methods
+- Domain models
+
+**Example:**
+
+```csharp BookingPaymentValidatorTests.cs
+using Moq;
+using Xunit;
+
+public class BookingPaymentValidatorTests
+{
+    [Theory]
+    [InlineData("Cash")]
+    [InlineData("Wallet")]
+    [InlineData("BankTransfer")]
+    [InlineData("Moyasar")]
+    public void ValidatePaymentMethod_WithValidMethod_DoesNotThrow(
+        string paymentMethod)
+    {
+        // Act & Assert
+        var exception = Record.Exception(() => 
+            BookingPaymentValidator.ValidatePaymentMethod(paymentMethod));
+        
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void ValidatePaymentMethod_WithInvalidMethod_ThrowsArgumentException()
+    {
+        // Arrange
+        string invalidMethod = "Bitcoin";
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => 
+            BookingPaymentValidator.ValidatePaymentMethod(invalidMethod));
+        
+        Assert.Contains("Invalid payment method", exception.Message);
+    }
+
+    [Fact]
+    public async Task ValidateWalletBalance_WhenInsufficientFunds_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var mockRepository = new Mock<IPassengerWalletRepository>();
+        mockRepository.Setup(r => r.GetByPassengerIdAndCurrencyAsync(
+                "passenger-123", "SAR", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PassengerWallet 
+            { 
+                Balance = 50, 
+                Currency = "SAR" 
+            });
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await BookingPaymentValidator.ValidateWalletBalanceAsync(
+                "passenger-123",
+                "SAR",
+                totalPrice: 100,
+                mockRepository.Object,
+                CancellationToken.None));
+
+        Assert.Contains("insufficient balance", 
+            exception.Message, 
+            StringComparison.OrdinalIgnoreCase);
+    }
+}
+```
+
+### End-to-End Tests
+
+Test complete user journeys across multiple services.
+
+**Example Scenarios:**
+- User creates trip → Passenger books seat → Driver accepts → Trip completes → Payment settles
+- Passenger searches trips → Books seat → Cancels booking → Refund processed
+
+```csharp BookingFlowE2ETests.cs
+public class BookingFlowE2ETests : IClassFixture<MasarEagleTestFixture>
+{
+    private readonly MasarEagleTestFixture _fixture;
+
+    public BookingFlowE2ETests(MasarEagleTestFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task CompleteBookingFlow_FromCreationToAcceptance()
+    {
+        // 1. Driver creates trip
+        var createTripRequest = new CreateTripRequest
+        {
+            From = "Riyadh",
+            To = "Jeddah",
+            DepartureTime = DateTime.UtcNow.AddDays(1),
+            TotalSeats = 4,
+            Price = 150
+        };
+
+        var createResponse = await _fixture.TripsClient
+            .PostAsJsonAsync("/api/trips", createTripRequest);
+        
+        createResponse.EnsureSuccessStatusCode();
+        var trip = await createResponse.Content
+            .ReadFromJsonAsync<TripResponse>();
+
+        // 2. Passenger books seat
+        var bookRequest = new BookSeatRequest
+        {
+            PassengerId = _fixture.TestPassenger.Id,
+            RequestedSeatsCount = 2,
+            PaymentMethod = "Cash"
+        };
+
+        var bookResponse = await _fixture.TripsClient
+            .PostAsJsonAsync($"/api/trips/{trip.Id}/book-seat", bookRequest);
+        
+        bookResponse.EnsureSuccessStatusCode();
+        var booking = await bookResponse.Content
+            .ReadFromJsonAsync<BookSeatResponse>();
+
+        // 3. Verify notification sent to driver
+        await _fixture.WaitForNotificationAsync(
+            _fixture.TestDriver.Id,
+            notificationType: "BookingCreated",
+            timeout: TimeSpan.FromSeconds(10));
+
+        // 4. Driver accepts booking
+        var acceptResponse = await _fixture.TripsClient
+            .PostAsync($"/api/bookings/{booking.BookingId}/accept", null);
+        
+        acceptResponse.EnsureSuccessStatusCode();
+
+        // 5. Verify booking status updated
+        var bookingStatus = await _fixture.TripsClient
+            .GetFromJsonAsync<BookingStatusResponse>(
+                $"/api/bookings/{booking.BookingId}/status");
+        
+        Assert.Equal("Confirmed", bookingStatus.Status);
+
+        // 6. Verify notification sent to passenger
+        await _fixture.WaitForNotificationAsync(
+            _fixture.TestPassenger.Id,
+            notificationType: "BookingAccepted",
+            timeout: TimeSpan.FromSeconds(10));
+    }
+}
+```
+
+## Test Infrastructure
+
+### WebApplicationFactory Setup
+
+```csharp TestWebApplicationFactory.cs
+public class TestWebApplicationFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.ConfigureServices(services =>
+        {
+            // Remove production database
+            var descriptor = services.SingleOrDefault(
+                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+            
+            if (descriptor != null)
+            {
+                services.Remove(descriptor);
+            }
+
+            // Add test database
+            services.AddDbContext<AppDbContext>(options =>
+            {
+                options.UseNpgsql(
+                    TestDatabaseFixture.ConnectionString);
+            });
+
+            // Override external services with test doubles
+            services.Replace(ServiceDescriptor.Scoped<IUsersApiService, 
+                TestUsersApiService>());
+        });
+
+        builder.UseEnvironment("Testing");
+    }
+}
+```
+
+### Database Fixture
+
+Use Docker to run PostgreSQL for tests.
+
+```csharp TestDatabaseFixture.cs
+public class TestDatabaseFixture : IAsyncLifetime
+{
+    private readonly PostgreSqlContainer _container;
+    public string ConnectionString { get; private set; }
+
+    public TestDatabaseFixture()
+    {
+        _container = new PostgreSqlBuilder()
+            .WithImage("postgres:15")
+            .WithDatabase("testdb")
+            .WithUsername("test")
+            .WithPassword("test")
+            .Build();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _container.StartAsync();
+        ConnectionString = _container.GetConnectionString();
+        
+        // Run migrations
+        await RunMigrationsAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        await _container.DisposeAsync();
+    }
+
+    private async Task RunMigrationsAsync()
+    {
+        var serviceProvider = new ServiceCollection()
+            .AddFluentMigratorCore()
+            .ConfigureRunner(rb => rb
+                .AddPostgres()
+                .WithGlobalConnectionString(ConnectionString)
+                .ScanIn(typeof(Program).Assembly).For.Migrations())
+            .BuildServiceProvider();
+
+        using var scope = serviceProvider.CreateScope();
+        var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+        runner.MigrateUp();
+    }
+}
+```
+
+### Test Data Builders
+
+Use builder pattern for creating test data.
+
+```csharp TripTestDataBuilder.cs
+public class TripTestDataBuilder
+{
+    private string _id = Guid.NewGuid().ToString();
+    private string _from = "Riyadh";
+    private string _to = "Jeddah";
+    private DateTimeOffset _departureTime = DateTimeOffset.UtcNow.AddDays(1);
+    private int _totalSeats = 4;
+    private int _availableSeats = 4;
+    private decimal _price = 100;
+    private string _status = TripStatuses.Scheduled;
+
+    public TripTestDataBuilder WithId(string id)
+    {
+        _id = id;
+        return this;
+    }
+
+    public TripTestDataBuilder WithRoute(string from, string to)
+    {
+        _from = from;
+        _to = to;
+        return this;
+    }
+
+    public TripTestDataBuilder WithSeats(int total, int available)
+    {
+        _totalSeats = total;
+        _availableSeats = available;
+        return this;
+    }
+
+    public TripTestDataBuilder WithPrice(decimal price)
+    {
+        _price = price;
+        return this;
+    }
+
+    public TripTestDataBuilder WithStatus(string status)
+    {
+        _status = status;
+        return this;
+    }
+
+    public Trip Build()
+    {
+        return new Trip
+        {
+            Id = _id,
+            From = _from,
+            To = _to,
+            DepartureTimeUtc = _departureTime,
+            TotalSeats = _totalSeats,
+            AvailableSeatCount = _availableSeats,
+            ReservedSeatCount = 0,
+            Price = _price,
+            Status = _status,
+            DriverId = "test-driver",
+            VehicleId = "test-vehicle",
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+    }
+}
+
+// Usage
+var trip = new TripTestDataBuilder()
+    .WithRoute("Riyadh", "Mecca")
+    .WithSeats(total: 6, available: 4)
+    .WithPrice(120)
+    .Build();
+```
+
+## Testing Patterns
+
+### Arrange-Act-Assert
+
+Structure all tests with clear sections.
+
+```csharp
+[Fact]
+public async Task Example_Test()
+{
+    // Arrange - Set up test data and dependencies
+    var trip = await CreateTestTripAsync();
+    var request = new BookSeatRequest { /* ... */ };
+
+    // Act - Execute the operation being tested
+    var response = await _client.PostAsJsonAsync(
+        $"/api/trips/{trip.Id}/book-seat", request);
+
+    // Assert - Verify expected outcomes
+    response.EnsureSuccessStatusCode();
+    var result = await response.Content.ReadFromJsonAsync<BookSeatResponse>();
+    Assert.True(result.Success);
+}
+```
+
+### Test Data Cleanup
+
+Clean up test data after each test.
+
+```csharp
+public class BookingTests : IAsyncLifetime
+{
+    private readonly List<string> _createdTripIds = new();
+    private readonly List<string> _createdBookingIds = new();
+
+    public async Task InitializeAsync()
+    {
+        // Setup
+    }
+
+    public async Task DisposeAsync()
+    {
+        // Cleanup
+        foreach (var bookingId in _createdBookingIds)
+        {
+            await _db.GetTable<Booking>()
+                .Where(b => b.Id == bookingId)
+                .DeleteAsync();
+        }
+
+        foreach (var tripId in _createdTripIds)
+        {
+            await _db.GetTable<Trip>()
+                .Where(t => t.Id == tripId)
+                .DeleteAsync();
+        }
+    }
+
+    private async Task<Trip> CreateTestTripAsync()
+    {
+        var trip = new Trip { /* ... */ };
+        await _db.InsertAsync(trip);
+        _createdTripIds.Add(trip.Id);
+        return trip;
+    }
+}
+```
+
+### Async Testing
+
+Always use async/await in tests.
+
+```csharp
+[Fact]
+public async Task AsyncOperation_Test()
+{
+    // Good
+    var result = await _service.GetDataAsync();
+    Assert.NotNull(result);
+
+    // Bad - Blocking
+    // var result = _service.GetDataAsync().Result;
+}
+```
+
+### Theory Tests
+
+Use `[Theory]` for parameterized tests.
+
+```csharp
+[Theory]
+[InlineData(1, 100, 100)]
+[InlineData(2, 100, 200)]
+[InlineData(5, 150, 750)]
+public async Task BookSeat_CalculatesTotalPrice_Correctly(
+    int seatsCount, decimal pricePerSeat, decimal expectedTotal)
+{
+    // Arrange
+    var trip = await CreateTestTripAsync(price: pricePerSeat);
+    var request = new BookSeatRequest 
+    { 
+        RequestedSeatsCount = seatsCount 
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync(
+        $"/api/trips/{trip.Id}/book-seat", request);
+
+    // Assert
+    var result = await response.Content
+        .ReadFromJsonAsync<BookSeatResponse>();
+    Assert.Equal(expectedTotal, result.TotalPrice);
+}
+```
+
+## Running Tests
+
+### Command Line
+
+```bash
+# Run all tests
+dotnet test
+
+# Run specific test class
+dotnet test --filter FullyQualifiedName~BookSeatTests
+
+# Run with coverage
+dotnet test --collect:"XPlat Code Coverage"
+
+# Run in parallel
+dotnet test --parallel
+```
+
+### Visual Studio / Rider
+
+Use the built-in test runner for interactive testing and debugging.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Test Behavior, Not Implementation">
+    Focus on testing observable behavior and outcomes, not internal implementation details.
+  </Accordion>
+  
+  <Accordion title="Keep Tests Independent">
+    Each test should be able to run in isolation without depending on other tests.
+  </Accordion>
+  
+  <Accordion title="Use Descriptive Test Names">
+    Test names should clearly describe what is being tested and the expected outcome.
+    
+    ```csharp
+    // Good
+    BookSeat_WhenNotEnoughSeats_ReturnsBadRequest()
+    
+    // Bad
+    Test1()
+    BookSeatTest()
+    ```
+  </Accordion>
+  
+  <Accordion title="One Assert Per Concept">
+    While multiple asserts are okay, they should all relate to verifying the same logical concept.
+  </Accordion>
+  
+  <Accordion title="Mock External Services">
+    Use test doubles for external HTTP APIs, payment gateways, etc. Test real dependencies like databases.
+  </Accordion>
+</AccordionGroup>
+
+## Coverage Goals
+
+<Note>
+**Target Coverage:**
+- Critical paths: 100%
+- Business logic: 80%+
+- Overall: 70%+
+
+Focus on meaningful coverage, not just hitting percentage targets.
+</Note>
+
+## Continuous Integration
+
+Tests run automatically on every pull request.
+
+```yaml .github/workflows/test.yml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+      
+      - name: Restore dependencies
+        run: dotnet restore
+      
+      - name: Build
+        run: dotnet build --no-restore
+      
+      - name: Test
+        run: dotnet test --no-build --verbosity normal --collect:"XPlat Code Coverage"
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Adding Features" icon="plus" href="/development/adding-features">
+    Write tests for your new features
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand the system architecture
+  </Card>
+</CardGroup>

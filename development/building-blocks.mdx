@@ -1,0 +1,453 @@
+---
+title: Building Blocks
+description: Shared building blocks and infrastructure components used across all Masar Eagle services
+---
+
+Masar Eagle uses a shared set of building blocks that provide common functionality across all microservices. These components are located in `src/BuildingBlocks/` and are designed for reusability, consistency, and maintainability.
+
+## Overview
+
+The BuildingBlocks directory contains six main packages:
+
+<CardGroup cols={2}>
+  <Card title="Common" icon="code" href="#common">
+    Authentication, endpoints, middleware, and shared utilities
+  </Card>
+  <Card title="MasarEagle.Constants" icon="hashtag" href="#constants">
+    Shared constants for Aspire components and observability
+  </Card>
+  <Card title="MasarEagle.Database" icon="database" href="#database">
+    Database connection and registration utilities
+  </Card>
+  <Card title="MasarEagle.Migrations" icon="arrow-up" href="#migrations">
+    FluentMigrator base classes and migration service
+  </Card>
+  <Card title="NotificationContracts" icon="bell" href="#notification-contracts">
+    Notification message contracts for cross-service messaging
+  </Card>
+  <Card title="SyncContracts" icon="arrows-rotate" href="#sync-contracts">
+    Synchronization message contracts for data consistency
+  </Card>
+</CardGroup>
+
+## Common
+
+The `Common` building block provides essential shared functionality used across all services.
+
+### Authentication
+
+Centralized JWT authentication and authorization configuration.
+
+**Location:** `src/BuildingBlocks/Common/Authentication/`
+
+<CodeGroup>
+```csharp AuthenticationExtensions.cs
+public static class AuthenticationExtensions
+{
+    public static IServiceCollection AddAppAuthentication(
+        this IServiceCollection services, 
+        IConfiguration configuration)
+    {
+        var identityUrl = configuration["services:identity:http:0"]
+                       ?? configuration["services:identity:https:0"]
+                       ?? throw new InvalidOperationException(
+                           "Identity URL not configured");
+
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
+            {
+                options.RequireHttpsMetadata = false;
+                options.MapInboundClaims = false;
+                options.MetadataAddress = 
+                    $"{identityUrl.TrimEnd('/')}/.well-known/openid-configuration";
+
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateAudience = false,
+                    RoleClaimType = Roles.ClaimType,
+                    NameClaimType = "sub"
+                };
+            });
+
+        return services.AddPolicies();
+    }
+}
+```
+
+```csharp AuthConstants.cs
+public static class Roles
+{
+    public const string Admin = "Admin";
+    public const string Driver = "Driver";
+    public const string Passenger = "Passenger";
+    public const string Company = "Company";
+}
+
+public static class Policies
+{
+    public const string Admin = "AdminPolicy";
+    public const string Driver = "DriverPolicy";
+    public const string Passenger = "PassengerPolicy";
+    public const string Company = "CompanyPolicy";
+    public const string AdminOrDriver = "AdminOrDriverPolicy";
+    public const string DriverOrPassenger = "DriverOrPassengerPolicy";
+    public const string AdminOrDriverOrPassenger = "AdminOrDriverOrPassengerPolicy";
+}
+```
+</CodeGroup>
+
+**Usage in Program.cs:**
+```csharp
+builder.Services.AddAppAuthentication(builder.Configuration);
+
+app.UseAppAuthentication();
+```
+
+### Endpoints
+
+Interface-based endpoint registration system using static abstract interface members (C# 11+).
+
+**Location:** `src/BuildingBlocks/Common/Endpoints/`
+
+<CodeGroup>
+```csharp IEndpoint.cs
+public interface IEndpoint
+{
+    static abstract void Map(IEndpointRouteBuilder app);
+}
+```
+
+```csharp EndpointRegistration.cs
+public static class EndpointRegistration
+{
+    public static IEndpointRouteBuilder MapEndpointsFromAssembly(
+        this IEndpointRouteBuilder app, 
+        Assembly assembly)
+    {
+        IEnumerable<TypeInfo> endpointTypes = assembly.DefinedTypes
+            .Where(t => t is { IsAbstract: false, IsInterface: false }
+                        && t.IsAssignableTo(typeof(IEndpoint)));
+
+        foreach (TypeInfo type in endpointTypes)
+        {
+            MethodInfo? mapMethod = type.GetMethod(
+                nameof(IEndpoint.Map),
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+
+            mapMethod?.Invoke(null, [app]);
+        }
+
+        return app;
+    }
+}
+```
+</CodeGroup>
+
+**See:** [Adding Features](/development/adding-features) for endpoint implementation examples.
+
+### Middleware
+
+Global exception handling middleware with structured logging and metrics.
+
+**Location:** `src/BuildingBlocks/Common/Middleware/GlobalExceptionMiddleware.cs`
+
+**Key Features:**
+- Structured error logging with context
+- OpenTelemetry metrics (error counters, duration histograms)
+- RFC 7807 Problem Details responses
+- Environment-specific error details
+- Custom exception type handling
+
+```csharp
+public sealed class GlobalExceptionMiddleware(
+    RequestDelegate next,
+    ILogger<GlobalExceptionMiddleware> logger,
+    IHostEnvironment environment)
+{
+    private static readonly Meter ErrorMeter = new("MasarEagle.Errors", "1.0.0");
+    private static readonly Counter<long> ErrorCounter = 
+        ErrorMeter.CreateCounter<long>("errors_total");
+    private static readonly Histogram<double> ErrorDuration = 
+        ErrorMeter.CreateHistogram<double>("error_duration_seconds");
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await next(context);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            await HandleExceptionAsync(context, ex, stopwatch.Elapsed);
+        }
+    }
+}
+```
+
+**Usage:**
+```csharp
+app.UseGlobalExceptionHandler();
+```
+
+### Wolverine Extensions
+
+Wolverine messaging configuration with RabbitMQ and PostgreSQL transactional outbox support.
+
+**Location:** `src/BuildingBlocks/Common/WolverineExtensions.cs`
+
+```csharp
+public static async Task UseWolverineWithRabbitMqAsync(
+    this IHostApplicationBuilder builder,
+    Action<WolverineOptions> configureMessaging)
+{
+    // Retry policy for RabbitMQ connection
+    AsyncRetryPolicy retryPolicy = Policy
+        .Handle<BrokerUnreachableException>()
+        .Or<SocketException>()
+        .WaitAndRetryAsync(5, retryAttempt => 
+            TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+
+    builder.UseWolverine(opts =>
+    {
+        opts.UseRabbitMqUsingNamedConnection("rabbitmq")
+            .AutoProvision()
+            .DeclareExchange("notifications");
+
+        configureMessaging(opts);
+    });
+}
+```
+
+## Constants
+
+Shared constants for Aspire components and observability configuration.
+
+**Location:** `src/BuildingBlocks/MasarEagle.Constants/`
+
+### Aspire Components
+
+```csharp Components.cs
+public static class Components
+{
+    public static readonly string Postgres = "postgres";
+    public static readonly string RabbitMQ = "rabbitmq";
+    
+    public static class Database
+    {
+        public static readonly string User = "userdb";
+        public static readonly string Trip = "tripdb";
+        public static readonly string Notifications = "notificationsdb";
+        public static readonly string Auth = "authdb";
+    }
+    
+    public static class RabbitMQConfig
+    {
+        public static readonly string ConnectionName = "rabbitmq";
+        public static readonly string QueueName = "notifications";
+        public static readonly string ExchangeName = "notifications";
+    }
+}
+```
+
+### Services
+
+```csharp Services.cs
+public static class Services
+{
+    public static readonly string Identity = "identity";
+    public static readonly string Users = "users-api";
+    public static readonly string Trips = "trips-api";
+    public static readonly string Notifications = "notifications-api";
+}
+```
+
+## Database
+
+Database connection management using Npgsql and LINQ to DB.
+
+**Location:** `src/BuildingBlocks/MasarEagle.Database/`
+
+### AppDataConnection
+
+Base data connection class for LINQ to DB.
+
+```csharp AppDataConnection.cs
+public class AppDataConnection : DataConnection
+{
+    public AppDataConnection(NpgsqlDataSource dataSource)
+        : this(CreateProviderAndConnection(dataSource))
+    {
+    }
+
+    private AppDataConnection(
+        (IDataProvider provider, NpgsqlConnection connection) ctx)
+        : base(ctx.provider, ctx.connection)
+    {
+    }
+
+    private static (IDataProvider, NpgsqlConnection) CreateProviderAndConnection(
+        NpgsqlDataSource dataSource)
+    {
+        NpgsqlConnection connection = dataSource.CreateConnection();
+        IDataProvider provider = PostgreSQLTools.GetDataProvider(PostgreSQLVersion.v15);
+        return (provider, connection);
+    }
+}
+```
+
+### Database Registration
+
+```csharp DatabaseRegistration.cs
+public static class DatabaseRegistration
+{
+    public static IHostApplicationBuilder AddNpgsqlDataSource(
+        this IHostApplicationBuilder builder,
+        string connectionStringName)
+    {
+        builder.Services.AddSingleton(sp =>
+        {
+            string connectionString = sp.GetRequiredService<IConfiguration>()
+                .GetConnectionString(connectionStringName)
+                ?? throw new InvalidOperationException(
+                    $"Connection string '{connectionStringName}' not found.");
+
+            return new NpgsqlDataSourceBuilder(connectionString)
+                .ConfigureDatabaseConnection()
+                .Build();
+        });
+
+        return builder;
+    }
+
+    public static IServiceCollection AddAppDataConnection(
+        this IServiceCollection services)
+    {
+        services.AddScoped<AppDataConnection>(sp =>
+            new AppDataConnection(sp.GetRequiredService<NpgsqlDataSource>()));
+
+        return services;
+    }
+}
+```
+
+**Usage:**
+```csharp
+builder.AddNpgsqlDataSource(Components.Database.Trip);
+builder.Services.AddAppDataConnection();
+```
+
+## Migrations
+
+FluentMigrator base classes and automated migration service.
+
+**Location:** `src/BuildingBlocks/MasarEagle.Migrations/`
+
+**See:** [Database Migrations](/development/database-migrations) for detailed documentation.
+
+### Key Components
+
+<CardGroup cols={2}>
+  <Card title="BaseMigration" icon="layer-group">
+    Abstract base class with helper methods for creating tables, indexes, and foreign keys
+  </Card>
+  <Card title="DatabaseMigrationService" icon="rocket">
+    Background service that waits for database availability and runs migrations on startup
+  </Card>
+  <Card title="MigrationExtensions" icon="puzzle-piece">
+    Extension methods for registering migrations in the DI container
+  </Card>
+</CardGroup>
+
+## Notification Contracts
+
+Message contracts for publishing notifications across services using Wolverine.
+
+**Location:** `src/BuildingBlocks/MasarEagle.NotificationContracts/`
+
+**Examples:**
+- `BookingCreatedNotification`
+- `BookingAcceptedNotification`
+- `TripCancelledNotification`
+- `BankTransferPendingReviewNotification`
+
+**Usage:**
+```csharp
+var notification = new BookingCreatedNotification(
+    bookingId,
+    tripId,
+    driverId,
+    passengerId,
+    passengerName,
+    seatsCount,
+    totalPrice,
+    from,
+    to,
+    departureTime);
+
+await messageBus.PublishAsync(notification);
+```
+
+## Sync Contracts
+
+Message contracts for synchronizing data between services.
+
+**Location:** `src/BuildingBlocks/MasarEagle.SyncContracts/`
+
+**Examples:**
+- `UploadFileCommand`
+- `UpdateDriverRatingCommand`
+- `UpdatePassengerRatingCommand`
+
+**Usage:**
+```csharp
+await messageBus.PublishAsync(
+    new UpdateDriverRatingCommand(driverId, newRating));
+```
+
+## Project References
+
+To use a building block in your service:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\..\BuildingBlocks\Common\Common.csproj" />
+  <ProjectReference Include="..\..\BuildingBlocks\MasarEagle.Database\MasarEagle.Database.csproj" />
+  <ProjectReference Include="..\..\BuildingBlocks\MasarEagle.Migrations\MasarEagle.Migrations.csproj" />
+  <ProjectReference Include="..\..\BuildingBlocks\MasarEagle.Constants\MasarEagle.Constants.csproj" />
+  <ProjectReference Include="..\..\BuildingBlocks\MasarEagle.NotificationContracts\MasarEagle.NotificationContracts.csproj" />
+  <ProjectReference Include="..\..\BuildingBlocks\MasarEagle.SyncContracts\MasarEagle.SyncContracts.csproj" />
+</ItemGroup>
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep Building Blocks Service-Agnostic">
+    Building blocks should contain only generic, reusable code. Service-specific logic belongs in the service itself.
+  </Accordion>
+  
+  <Accordion title="Version Carefully">
+    Changes to building blocks affect all services. Use semantic versioning and test thoroughly across all consuming services.
+  </Accordion>
+  
+  <Accordion title="Document Public APIs">
+    All public classes, methods, and extension methods should have XML documentation comments.
+  </Accordion>
+  
+  <Accordion title="Use Dependency Injection">
+    Provide extension methods for IServiceCollection to register services consistently.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Adding Features" icon="plus" href="/development/adding-features">
+    Learn how to implement new features using these building blocks
+  </Card>
+  <Card title="Database Migrations" icon="database" href="/development/database-migrations">
+    Understand the migration system and how to create schema changes
+  </Card>
+</CardGroup>

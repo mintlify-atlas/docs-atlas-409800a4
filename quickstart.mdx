@@ -1,80 +1,306 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Masar Eagle running locally in minutes with .NET Aspire orchestration
 ---
 
-## Get started in three steps
+Get your Masar Eagle transportation system up and running locally in minutes. This guide uses .NET Aspire to orchestrate all microservices, databases, and observability tools automatically.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Before you begin, ensure you have the following installed:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title=".NET 9 SDK" icon="microsoft">
+    Download from [dotnet.microsoft.com](https://dotnet.microsoft.com/download)
+  </Card>
+  <Card title="Docker Desktop" icon="docker">
+    Required for PostgreSQL, RabbitMQ, and observability stack
+  </Card>
+  <Card title=".NET Aspire Workload" icon="layer-group">
+    Install with: `dotnet workload install aspire`
+  </Card>
+  <Card title="Git" icon="git-alt">
+    For cloning the repository
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Make sure Docker Desktop is running before starting the application. Aspire will automatically provision all required containers.
 </Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the Masar Eagle repository to your local machine:
+
+    ```bash
+    git clone https://github.com/your-username/masar-eagle.git
+    cd masar-eagle
+    ```
+  </Step>
+
+  <Step title="Navigate to AppHost">
+    The Aspire AppHost is your orchestration entry point:
+
+    ```bash
+    cd src/aspire/AppHost
+    ```
+  </Step>
+
+  <Step title="Run with Aspire">
+    Start the entire system with a single command:
+
+    ```bash
+    dotnet run
+    ```
+
+    Aspire will:
+    - Build all microservices
+    - Start PostgreSQL with 4 databases (users, trips, notifications, auth)
+    - Launch RabbitMQ for message queuing
+    - Deploy the observability stack (Prometheus, Grafana, Jaeger, Loki)
+    - Configure service discovery and health checks
+    - Open the Aspire Dashboard
+
+    <Note>
+    First run may take 5-10 minutes as Docker images are pulled and projects are built.
+    </Note>
+  </Step>
+
+  <Step title="Access the Aspire Dashboard">
+    The dashboard opens automatically at **http://localhost:8080**
+
+    Here you can:
+    - Monitor all service health and logs in real-time
+    - View resource consumption (CPU, memory, network)
+    - Access service endpoints
+    - Check distributed traces
+    - View environment variables and configuration
+  </Step>
+</Steps>
+
+## Verify Services
+
+Once Aspire finishes orchestration, verify all services are healthy:
+
+### Core Microservices
+
+<CodeGroup>
+```bash Gateway API
+curl http://localhost:<gateway-port>/health
+# Expected: {"status":"healthy"}
+```
+
+```bash Users API
+curl http://localhost:<users-port>/health
+# Expected: {"status":"healthy"}
+```
+
+```bash Trips API
+curl http://localhost:<trips-port>/health
+# Expected: {"status":"healthy"}
+```
+
+```bash Notifications API
+curl http://localhost:<notifications-port>/health
+# Expected: {"status":"healthy"}
+```
+
+```bash Identity Service
+curl http://localhost:<identity-port>/health
+# Expected: {"status":"healthy"}
+```
+</CodeGroup>
+
+<Note>
+Port numbers are dynamically assigned by Aspire. Check the **Aspire Dashboard** at http://localhost:8080 for exact endpoint URLs.
+</Note>
+
+### Infrastructure Services
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL (pgAdmin)" icon="database">
+    **URL:** http://localhost:5050
+    
+    View all databases:
+    - `userdb` - User profiles, drivers, passengers
+    - `tripdb` - Trip bookings, routes, seats
+    - `notificationsdb` - Push notification history
+    - `authdb` - Identity and authentication
+  </Card>
+
+  <Card title="RabbitMQ Management" icon="rabbit">
+    **URL:** http://localhost:15672
+    
+    **Credentials:** guest/guest
+    
+    Monitor:
+    - Message queues and exchanges
+    - Message throughput and routing
+    - Dead letter queues
+  </Card>
+
+  <Card title="Grafana Dashboard" icon="chart-line">
+    **URL:** Check Aspire Dashboard
+    
+    Unified observability:
+    - Service metrics and performance
+    - Log aggregation from all services
+    - Distributed traces
+  </Card>
+
+  <Card title="Jaeger Tracing" icon="project-diagram">
+    **URL:** http://localhost:16686
+    
+    Visualize:
+    - Request flows across services
+    - Latency bottlenecks
+    - Service dependencies
+  </Card>
+</CardGroup>
+
+## Explore the API
+
+Each service includes Swagger documentation:
+
+<Steps>
+  <Step title="Find Service Endpoints">
+    Open the **Aspire Dashboard** at http://localhost:8080 and locate the service endpoints under the "Resources" tab.
+  </Step>
+
+  <Step title="Access Swagger UI">
+    Navigate to any API service:
+    
+    ```
+    http://localhost:<service-port>/swagger
+    ```
+    
+    Available for:
+    - Users API
+    - Trips API
+    - Notifications API
+    - Gateway API (aggregated routes)
+  </Step>
+
+  <Step title="Test Endpoints">
+    Use Swagger UI to:
+    - Explore available endpoints
+    - View request/response schemas
+    - Execute test requests
+    - See authentication requirements
+  </Step>
+</Steps>
+
+## Default Configuration
+
+Aspire automatically configures the system with development defaults:
+
+### RabbitMQ Credentials
+
+```json
+{
+  "username": "guest",
+  "password": "guest"
+}
+```
+
+<Note>
+These credentials are defined in `src/aspire/AppHost/appsettings.json` and can be customized for different environments.
+</Note>
+
+### Database Connections
+
+All database connections are automatically injected via Aspire service discovery:
+
+```csharp
+// Example from Users.Api/Program.cs
+builder.AddServiceDefaults(); // Configures service discovery
+builder.AddDatabase();         // Auto-injects connection string
+```
+
+Connection strings are managed by Aspire - no manual configuration needed!
+
+### OpenTelemetry
+
+All services automatically export telemetry to the observability stack:
+
+```csharp
+// From AppHost.cs - Injected into all services
+WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcollector:4317")
+WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Docker connection errors">
+    **Problem:** Aspire can't connect to Docker
+    
+    **Solution:**
+    - Ensure Docker Desktop is running
+    - Check Docker daemon is accessible: `docker ps`
+    - Restart Docker Desktop if needed
+  </Accordion>
+
+  <Accordion title="Port conflicts">
+    **Problem:** Port already in use
+    
+    **Solution:**
+    Aspire auto-assigns most ports, but reserved ports include:
+    - 8080 (Aspire Dashboard)
+    - 5050 (pgAdmin)
+    - 15672 (RabbitMQ Management)
+    - 16686 (Jaeger UI)
+    
+    Stop conflicting services or modify port bindings in `AppHost.cs`
+  </Accordion>
+
+  <Accordion title="Service won't start">
+    **Problem:** A specific service fails to start
+    
+    **Solution:**
+    1. Check the Aspire Dashboard logs for the failing service
+    2. Verify dependencies are healthy (PostgreSQL, RabbitMQ)
+    3. Look for migration errors in database services
+    4. Check the console output for build errors
+  </Accordion>
+
+  <Accordion title="Database migration issues">
+    **Problem:** Database migrations fail
+    
+    **Solution:**
+    Services automatically run migrations on startup using FluentMigrator:
+    
+    ```csharp
+    // From Users.Api/Program.cs
+    builder.Services.AddDatabaseMigrations(
+        builder.Configuration,
+        Assembly.GetExecutingAssembly(),
+        connectionStringName: Components.Database.User);
+    ```
+    
+    Check container logs in Aspire Dashboard for migration errors.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture">
+    Understand the microservices architecture and technology stack
+  </Card>
+  <Card title="Development Guide" icon="code" href="/development/building-blocks">
+    Set up your development environment and learn the development workflow
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/overview">
+    Explore detailed API documentation for all services
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/setup/docker-deployment">
+    Deploy to production with Docker Compose or Kubernetes
+  </Card>
+</CardGroup>
+
+<Warning>
+The development environment uses insecure defaults (e.g., `guest/guest` credentials, disabled certificate validation). Never use these settings in production!
+</Warning>

@@ -1,0 +1,157 @@
+---
+title: 'Send OTP'
+api: 'POST /api/auth/send-otp'
+description: 'Send a one-time password (OTP) to a phone number for authentication'
+---
+
+## Overview
+
+This endpoint generates and sends a one-time password (OTP) to the specified phone number via SMS. The OTP is valid for 5 minutes and can be used with the `/connect/token` endpoint to authenticate users.
+
+## Authentication
+
+This endpoint does not require authentication.
+
+## Request Body
+
+<ParamField body="phoneNumber" type="string" required>
+  The phone number to send the OTP to. Must include country code with + prefix (e.g., +966501234567).
+  
+  **Validation rules:**
+  - Must start with `+`
+  - Length must be between 9 and 16 digits (including country code)
+  - Only digits allowed after the `+` symbol
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Success message in Arabic: "تم إرسال رمز التحقق بنجاح" (OTP sent successfully)
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string" format="date-time">
+  ISO 8601 timestamp indicating when the OTP expires (5 minutes from generation)
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  The OTP code (6 digits). This field is only returned in development/testing environments.
+</ResponseField>
+
+<RequestExample>
+
+```bash cURL
+curl -X POST https://api.masareagle.com/api/auth/send-otp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+966501234567"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.masareagle.com/api/auth/send-otp', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    phoneNumber: '+966501234567'
+  })
+});
+
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'https://api.masareagle.com/api/auth/send-otp',
+    json={
+        'phoneNumber': '+966501234567'
+    }
+)
+
+data = response.json()
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200 Success
+{
+  "message": "تم إرسال رمز التحقق بنجاح",
+  "expiresAt": "2026-03-10T15:35:00Z",
+  "code": "123456"
+}
+```
+
+```json 400 Invalid Phone Number
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": {
+    "phoneNumber": [
+      "يجب أن يبدأ رقم الهاتف بعلامة +"
+    ]
+  }
+}
+```
+
+```json 400 Phone Number Required
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": {
+    "phoneNumber": [
+      "رقم الهاتف مطلوب"
+    ]
+  }
+}
+```
+
+```json 500 SMS Service Error
+{
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+  "title": "An error occurred while processing your request.",
+  "status": 500,
+  "detail": "Failed to send SMS"
+}
+```
+
+</ResponseExample>
+
+## Implementation Details
+
+The endpoint:
+1. Validates the phone number format according to `Identity.Core.ValueObjects.PhoneNumber` rules
+2. Generates a 6-digit OTP code using cryptographic random number generation
+3. Stores the OTP in the database with a 5-minute expiration
+4. Sends the OTP via SMS using the configured SMS provider (Taqnyat)
+5. Returns the expiration time to the client
+
+## Use Cases
+
+- **Driver Authentication**: Drivers use this endpoint to receive an OTP for passwordless login
+- **Passenger Authentication**: Passengers authenticate using their phone number and OTP
+- **Account Recovery**: Users can regain access to their account using their registered phone number
+
+## Next Steps
+
+After receiving the OTP:
+1. User enters the OTP code in your application
+2. Call the [Token endpoint](/api/identity/token) with grant type `urn:masareagle:otp` to exchange the OTP for access and refresh tokens
+3. Use the access token to authenticate subsequent API requests
+
+## Related Endpoints
+
+- [Resend OTP](/api/identity/resend-otp) - Resend OTP if not received or expired
+- [Token](/api/identity/token) - Exchange OTP for access tokens
+
+## Source Code Reference
+
+- Endpoint: `src/services/Identity/src/Identity.Web/AuthEndpoints.cs:12`
+- Command: `src/services/Identity/src/Identity.UseCases/Auth/SendOtp/SendOtpCommand.cs`
+- Phone Validation: `src/services/Identity/src/Identity.Core/ValueObjects/PhoneNumber.cs`

@@ -1,0 +1,484 @@
+---
+title: Users Service
+description: Manages drivers, passengers, companies, and administrative users
+---
+
+## Overview
+
+The Users service is responsible for managing all user entities in the Masar Eagle platform, including drivers, passengers, companies, and administrators. It handles user profiles, vehicle management, zone configuration, file uploads, and verification workflows.
+
+<Info>
+  Users service location: `src/services/Users/Users.Api/Program.cs`
+</Info>
+
+## Core Responsibilities
+
+- **Driver Management**: Registration, profile updates, document verification, and commission settings
+- **Passenger Management**: Profile management and wallet preferences
+- **Company Management**: Company profiles, employees, vehicles, and zones
+- **Vehicle Management**: Vehicle types, registration, and assignments
+- **Zone Management**: Geographic zones for service areas
+- **File Storage**: Profile images, documents, and verification photos
+- **Commission Policies**: Configure commission rates for drivers and companies
+- **Currency Management**: Multi-currency support
+- **User Verification**: Driver document review and approval workflow
+- **Background Jobs**: Account purge and data cleanup
+
+## Technology Stack
+
+- **ASP.NET Core Minimal APIs**: Endpoint definitions
+- **Entity Framework Core**: Database access
+- **PostgreSQL**: Primary database
+- **Wolverine**: Message bus with outbox pattern
+- **RabbitMQ**: Inter-service messaging
+- **FluentValidation**: Request validation
+- **Response Compression**: Brotli and Gzip for API responses
+- **Local File Storage**: File uploads to wwwroot directory
+
+## Program.cs Configuration
+
+```csharp Program.cs
+using Users.Api.Infrastructure.Extensions;
+using Users.Api.Infrastructure.Services;
+using Users.Api.Infrastructure.BackgroundJobs;
+using ServiceDefaults;
+using Wolverine.RabbitMQ;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// Configure Kestrel for large file uploads
+builder.WebHost.ConfigureKestrel(options => 
+    options.Limits.MaxRequestBodySize = null);
+
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = long.MaxValue;
+    options.ValueLengthLimit = int.MaxValue;
+    options.ValueCountLimit = int.MaxValue;
+});
+
+// Ensure file storage directories exist
+builder.EnsureFileStorageDirectories();
+
+builder.AddServiceDefaults();
+builder.Services.AddHealthChecks();
+
+// Enable response compression
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json",
+        "text/json"
+    });
+});
+
+builder.Services.AddSwaggerDocumentation();
+builder.Services.AddAppSettings(builder.Configuration);
+builder.Services.AddAppAuthentication(builder.Configuration);
+builder.AddDatabase();
+
+builder.Services.AddApplicationServices();
+builder.Services.AddValidatorsFromAssemblyContaining(typeof(Program));
+
+// Background job for purging soft-deleted accounts
+builder.Services.AddHostedService<AccountPurgeWorker>();
+
+// HTTP client for Trips service
+builder.Services.AddHttpClient<TripsUsageClient>("trip", 
+    client => client.BaseAddress = new Uri("https+http://trip"))
+    .AddServiceDiscovery();
+
+builder.Services.AddScoped<ITripsUsageClient>(provider =>
+{
+    var factory = provider.GetRequiredService<IHttpClientFactory>();
+    var httpClient = factory.CreateClient("trip");
+    var logger = provider.GetRequiredService<ILogger<TripsUsageClient>>();
+    return new TripsUsageClient(httpClient, logger);
+});
+
+// HTTP client for Notifications service
+builder.Services.AddHttpClient<NotificationsClient>("notifications", 
+    client => client.BaseAddress = new Uri("https+http://notifications"))
+    .AddServiceDiscovery();
+
+builder.Services.AddScoped<INotificationsClient>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    var http = factory.CreateClient("notifications");
+    var logger = sp.GetRequiredService<ILogger<NotificationsClient>>();
+    return new NotificationsClient(http, logger);
+});
+
+// Configure Wolverine with RabbitMQ and outbox pattern
+await builder.UseWolverineWithRabbitMqAsync(
+    new WolverineMessagingOptions
+    {
+        EnablePostgresOutbox = true,
+        PostgresConnectionName = Components.Database.User,
+        OutboxSchema = "wolverine"
+    },
+    opts =>
+    {
+        opts.PublishAllMessages()
+            .ToRabbitExchange(Components.RabbitMQConfig.ExchangeName);
+        
+        opts.ListenToRabbitQueue("users-api-queue",
+            cfg => cfg.BindExchange(Components.RabbitMQConfig.ExchangeName));
+        
+        opts.ApplicationAssembly = typeof(Program).Assembly;
+    });
+
+WebApplication app = builder.Build();
+
+app.UseResponseCompression();
+app.UseAppMiddleware();
+app.ConfigureStaticFiles();
+app.UseSwaggerDocumentation();
+app.UseAppCors();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapAllEndpoints();
+await app.RunAsync();
+```
+
+## API Endpoints Overview
+
+The Users service exposes numerous endpoints organized by domain:
+
+### Driver Endpoints
+
+<AccordionGroup>
+  <Accordion title="Profile Management">
+    - `GET /api/drivers/{driverId}` - Get driver profile
+    - `PUT /api/drivers/{driverId}` - Update driver profile
+    - `POST /api/drivers/profile/submit-for-review` - Submit profile for verification
+    - `DELETE /api/drivers/{driverId}` - Soft delete driver account
+  </Accordion>
+
+  <Accordion title="Wallet & Currency">
+    - `GET /api/drivers/me/wallet` - Get driver's wallet info
+    - `PUT /api/drivers/me/default-currency` - Set default currency
+    - `PUT /api/drivers/me/display-currency` - Set display currency
+  </Accordion>
+
+  <Accordion title="Company Association">
+    - `GET /api/drivers/{driverId}/company` - Get driver's company info
+    - Managed through company assignment workflows
+  </Accordion>
+
+  <Accordion title="App Settings">
+    - `GET /api/app/captains/settings` - Get driver app settings
+    - Returns version requirements, features, and configuration
+  </Accordion>
+</AccordionGroup>
+
+### Passenger Endpoints
+
+<AccordionGroup>
+  <Accordion title="Profile Management">
+    - `GET /api/passengers/{passengerId}` - Get passenger profile
+    - `PUT /api/passengers/{passengerId}` - Update passenger profile
+    - `DELETE /api/passengers/{passengerId}` - Soft delete passenger account
+  </Accordion>
+
+  <Accordion title="App Settings">
+    - `GET /api/app/passengers/settings` - Get passenger app settings
+  </Accordion>
+</AccordionGroup>
+
+### Company Endpoints
+
+<AccordionGroup>
+  <Accordion title="Company Management">
+    - `GET /api/admin/companies` - List all companies (admin)
+    - `GET /api/admin/companies/{companyId}` - Get company details
+    - `POST /api/admin/companies` - Create new company
+    - `PUT /api/admin/companies/{companyId}` - Update company
+    - `GET /api/companies/{companyId}/public` - Public company info
+    - `GET /api/company/{companyId}` - Company profile for authenticated users
+  </Accordion>
+
+  <Accordion title="Employees & Drivers">
+    - `GET /api/admin/companies/{companyId}/drivers` - List company drivers
+    - `POST /api/admin/companies/{companyId}/drivers` - Assign driver to company
+    - `DELETE /api/admin/companies/{companyId}/drivers/{driverId}` - Remove driver
+  </Accordion>
+</AccordionGroup>
+
+### Vehicle Endpoints
+
+<AccordionGroup>
+  <Accordion title="Vehicle Management">
+    - `GET /api/vehicles` - List vehicles
+    - `GET /api/vehicles/{vehicleId}` - Get vehicle details
+    - `POST /api/vehicles` - Create vehicle
+    - `PUT /api/vehicles/{vehicleId}` - Update vehicle
+    - `DELETE /api/vehicles/{vehicleId}` - Delete vehicle
+    - `GET /api/admin/vehicles` - Admin vehicle listing
+  </Accordion>
+
+  <Accordion title="Vehicle Types">
+    - `GET /api/vehicle-types` - List vehicle types
+    - `POST /api/vehicle-types` - Create vehicle type (admin)
+    - `PUT /api/vehicle-types/{id}` - Update vehicle type
+    - `DELETE /api/vehicle-types/{id}` - Delete vehicle type
+  </Accordion>
+</AccordionGroup>
+
+### Zone Endpoints
+
+<AccordionGroup>
+  <Accordion title="Zone Management">
+    - `GET /api/zones` - List zones
+    - `GET /api/zones/{zoneId}` - Get zone details
+    - `POST /api/admin/zones` - Create zone (admin)
+    - `PUT /api/admin/zones/{zoneId}` - Update zone
+    - `DELETE /api/admin/zones/{zoneId}` - Delete zone
+    - `POST /api/zones/validate-travel` - Check if travel between zones is allowed
+  </Accordion>
+
+  <Accordion title="Cities">
+    - `GET /api/cities` - List cities
+    - `POST /api/cities` - Create city (admin)
+    - `PUT /api/cities/{cityId}` - Update city
+    - `DELETE /api/cities/{cityId}` - Delete city
+  </Accordion>
+</AccordionGroup>
+
+### Admin Endpoints
+
+<AccordionGroup>
+  <Accordion title="User Management">
+    - `GET /api/admin/admins` - List administrators
+    - `POST /api/admin/admins` - Create admin user
+    - `PUT /api/admin/admins/{adminId}` - Update admin
+    - `DELETE /api/admin/admins/{adminId}` - Delete admin
+    - `GET /api/admin/passengers` - List all passengers
+  </Accordion>
+
+  <Accordion title="Verification Reviews">
+    - `GET /api/admin/driver-verification-reviews` - Pending driver verifications
+    - `POST /api/admin/driver-verification-reviews/{reviewId}/approve` - Approve driver
+    - `POST /api/admin/driver-verification-reviews/{reviewId}/reject` - Reject driver
+  </Accordion>
+
+  <Accordion title="Commission Settings">
+    - `GET /api/admin/commission-settings` - List commission configurations
+    - `POST /api/admin/commission-settings` - Create commission rule
+    - `PUT /api/admin/commission-settings/{id}` - Update commission rule
+    - `GET /api/admin/commission-policies` - List commission policies
+    - `POST /api/admin/commission-policies` - Create policy
+  </Accordion>
+
+  <Accordion title="Currency Management">
+    - `GET /api/currencies` - Public currency list
+    - `GET /api/admin/currencies` - Admin currency management
+    - `POST /api/admin/currencies` - Add currency
+    - `PUT /api/admin/currencies/{code}` - Update currency
+    - `DELETE /api/admin/currencies/{code}` - Remove currency
+  </Accordion>
+</AccordionGroup>
+
+## File Storage
+
+The Users service handles file uploads for:
+
+- Driver profile photos
+- Driver license documents
+- Vehicle registration documents
+- National ID/Iqama scans
+- Company logos
+
+### Configuration
+
+```json appsettings.json
+"FileStorage": {
+  "Provider": "Local",
+  "UseAbsolutePath": true,
+  "MaxFileSizeMB": 2147483647,
+  "AllowedExtensions": [".jpg", ".jpeg", ".png", ".webp"],
+  "EnableImageResizing": true,
+  "MaxImageWidth": 1920,
+  "MaxImageHeight": 1080,
+  "ThumbnailWidth": 300,
+  "ThumbnailHeight": 200
+}
+```
+
+### Upload Endpoint
+
+Files are uploaded via:
+
+```http
+POST /uploads/upload
+Content-Type: multipart/form-data
+Authorization: Bearer {token}
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="license.jpg"
+Content-Type: image/jpeg
+
+[binary data]
+--boundary--
+```
+
+**Response:**
+```json
+{
+  "url": "/uploads/drivers/abc123/license.jpg",
+  "thumbnailUrl": "/uploads/drivers/abc123/license_thumb.jpg"
+}
+```
+
+### Static File Access
+
+Uploaded files are served at:
+
+```
+GET /uploads/{path}
+```
+
+The Gateway routes `/uploads/{**catch-all}` to the Users service.
+
+## App Version Management
+
+The service enforces minimum app versions:
+
+```json appsettings.json
+"AppVersion": {
+  "Captain": {
+    "Android": { "Current": 26, "Latest": 26 },
+    "Ios": { "Current": 26, "Latest": 26 }
+  },
+  "Passenger": {
+    "Android": { "Current": 20, "Latest": 20 },
+    "Ios": { "Current": 20, "Latest": 20 }
+  }
+}
+```
+
+Clients with versions below `Current` are blocked from API access.
+
+## Background Jobs
+
+### AccountPurgeWorker
+
+The service includes a background worker that periodically purges soft-deleted accounts:
+
+```csharp
+builder.Services.AddHostedService<AccountPurgeWorker>();
+```
+
+This job runs daily and permanently deletes accounts that have been soft-deleted for more than 30 days.
+
+## Inter-Service Communication
+
+The Users service communicates with:
+
+### Trips Service
+
+To check if users have active trips before allowing certain operations:
+
+```csharp
+var hasActiveTrips = await tripsUsageClient
+    .HasActiveTripsAsync(userId, userType);
+```
+
+### Notifications Service
+
+To send notifications for:
+- Driver approval/rejection
+- Company invitations
+- Account status changes
+
+```csharp
+await notificationsClient.SendNotificationAsync(
+    userId,
+    userType,
+    "تم قبول طلبك",
+    "مبروك! تم الموافقة على حسابك كسائق"
+);
+```
+
+## Message Bus Events
+
+The Users service publishes events via Wolverine + RabbitMQ:
+
+**Published Events:**
+- `DriverCreated`
+- `DriverUpdated`
+- `DriverApproved`
+- `DriverRejected`
+- `PassengerCreated`
+- `CompanyCreated`
+- `VehicleCreated`
+
+**Consumed Events:**
+- `UserAuthenticatedEvent` - Provisions user on first login
+- `UpdateDriverRatingCommand` - Updates driver rating after trip
+- `UpdatePassengerRatingCommand` - Updates passenger rating after trip
+- `UploadFileCommand` - Handles async file processing
+
+### Outbox Pattern
+
+The service uses Wolverine's PostgreSQL outbox to ensure reliable message delivery:
+
+```csharp
+await builder.UseWolverineWithRabbitMqAsync(
+    new WolverineMessagingOptions
+    {
+        EnablePostgresOutbox = true,
+        PostgresConnectionName = Components.Database.User,
+        OutboxSchema = "wolverine"
+    },
+    opts => { /* ... */ }
+);
+```
+
+Messages are first written to the database, then published to RabbitMQ, ensuring no events are lost even if the service crashes.
+
+## Email Configuration
+
+The service can send emails to company users:
+
+```json appsettings.json
+"EmailConfiguration": {
+  "ApiToken": "re_aafvLsKP_8TkeNCof63WgXyR4RgfyvSux",
+  "From": "onboarding@masar-eagle.com",
+  "DisplayName": "مسار إيجل",
+  "CompanyPortalUrl": "https://portal.masar-eagle.com",
+  "LogoUrl": "https://prod.api.masar-eagle.com/uploads/logos/logo.png"
+}
+```
+
+## Swagger Documentation
+
+API documentation is available at:
+
+```
+GET /swagger
+```
+
+The Swagger UI includes all endpoints with request/response schemas.
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Identity Service" icon="key" href="/services/identity">
+    Authenticates users and provisions accounts
+  </Card>
+  <Card title="Trips Service" icon="car" href="/services/trips">
+    Checks user eligibility for operations
+  </Card>
+  <Card title="Notifications Service" icon="bell" href="/services/notifications">
+    Sends user notifications
+  </Card>
+  <Card title="Gateway" icon="network-wired" href="/services/gateway">
+    Routes user-related requests
+  </Card>
+</CardGroup>

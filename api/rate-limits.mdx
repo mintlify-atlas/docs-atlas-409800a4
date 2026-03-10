@@ -1,0 +1,506 @@
+---
+title: 'Rate Limits'
+description: 'API rate limiting policies and best practices'
+icon: 'gauge'
+---
+
+## Current Implementation
+
+The Masar Eagle API **does not currently enforce global rate limits** at the gateway level. However, understanding rate limiting concepts is important for future-proofing your integration.
+
+<Warning>
+While global rate limits are not currently enforced, individual services may implement their own rate limiting, and global limits may be introduced in future releases.
+</Warning>
+
+## Service-Level Limits
+
+Some services implement their own rate limiting policies:
+
+### OTP Service Limits
+
+The authentication OTP service enforces the following limits to prevent abuse:
+
+<CardGroup cols={2}>
+  <Card title="OTP Verification" icon="shield-check">
+    **Max Attempts**: 5 verification attempts per OTP
+    
+    **Reset**: On successful verification or OTP expiry
+  </Card>
+  
+  <Card title="OTP Resend" icon="rotate">
+    **Max Resends**: 3 times within 30-minute window
+    
+    **Cooldown**: 1 minute between resend requests
+  </Card>
+</CardGroup>
+
+**Exceeded Limits Response:**
+
+```json
+{
+  "status": 400,
+  "title": "OTP limit exceeded",
+  "detail": "لقد تجاوزت الحد الأقصى لعدد محاولات التحقق",
+  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.1"
+}
+```
+
+### Upload Size Limits
+
+File upload endpoints have the following restrictions:
+
+- **Max Request Size**: Unlimited (controlled by Kestrel configuration)
+- **Multipart Body Length**: Configured at application level
+- **File Type Validation**: Enforced per endpoint
+
+<Info>
+While there's no hard limit on request size, network timeouts and proxy configurations may effectively limit very large uploads.
+</Info>
+
+## Future Rate Limiting
+
+Planned rate limiting features include:
+
+### Global API Limits (Planned)
+
+<CodeGroup>
+```text Per-User Limits
+Authenticated Requests: 1000 requests/minute
+Burst Allowance: 1500 requests/minute
+Anonymous Requests: 60 requests/minute
+```
+
+```text Per-Endpoint Limits
+Authentication: 20 requests/minute
+Search/Listing: 100 requests/minute
+Mutations: 50 requests/minute
+```
+</CodeGroup>
+
+### Rate Limit Headers (Planned)
+
+When rate limiting is implemented, responses will include the following headers:
+
+<ResponseField name="X-RateLimit-Limit" type="string">
+  Maximum number of requests allowed in the current window
+</ResponseField>
+
+<ResponseField name="X-RateLimit-Remaining" type="string">
+  Number of requests remaining in the current window
+</ResponseField>
+
+<ResponseField name="X-RateLimit-Reset" type="string">
+  Unix timestamp when the rate limit window resets
+</ResponseField>
+
+<ResponseField name="Retry-After" type="string">
+  Seconds to wait before retrying (included in 429 responses)
+</ResponseField>
+
+**Example Headers:**
+
+```text
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 847
+X-RateLimit-Reset: 1710345000
+```
+
+### Rate Limit Exceeded Response (Planned)
+
+When rate limits are exceeded, the API will return HTTP 429:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc6585#section-4",
+  "title": "Too Many Requests",
+  "status": 429,
+  "detail": "Rate limit exceeded. Please retry after 60 seconds.",
+  "instance": "/api/drivers",
+  "errorId": "ABC123DEF456",
+  "timestamp": "2024-03-10T14:30:00.000Z",
+  "extensions": {
+    "retryAfter": 60,
+    "limit": 1000,
+    "windowSeconds": 60
+  }
+}
+```
+
+## Best Practices
+
+Even without enforced rate limits, follow these best practices:
+
+### 1. Implement Exponential Backoff
+
+Retry failed requests with exponential backoff:
+
+<CodeGroup>
+```javascript JavaScript
+class APIClient {
+  async requestWithRetry(url, options, maxRetries = 3) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, options);
+        
+        if (response.ok) {
+          return response;
+        }
+        
+        // Retry on 429 or 5xx errors
+        if (response.status === 429 || response.status >= 500) {
+          const retryAfter = response.headers.get('Retry-After');
+          const delay = retryAfter 
+            ? parseInt(retryAfter) * 1000 
+            : Math.pow(2, attempt) * 1000;
+          
+          console.log(`Retrying after ${delay}ms (attempt ${attempt + 1})`);
+          await this.sleep(delay);
+          continue;
+        }
+        
+        // Don't retry on client errors (4xx except 429)
+        return response;
+      } catch (error) {
+        if (attempt === maxRetries - 1) throw error;
+        
+        const delay = Math.pow(2, attempt) * 1000;
+        await this.sleep(delay);
+      }
+    }
+  }
+  
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+```
+
+```python Python
+import time
+import requests
+from typing import Optional
+
+class APIClient:
+    def request_with_retry(self, url: str, max_retries: int = 3, **kwargs):
+        for attempt in range(max_retries):
+            try:
+                response = requests.request(**kwargs, url=url)
+                
+                if response.ok:
+                    return response
+                
+                # Retry on 429 or 5xx
+                if response.status_code == 429 or response.status_code >= 500:
+                    retry_after = response.headers.get('Retry-After')
+                    delay = int(retry_after) if retry_after else 2 ** attempt
+                    
+                    print(f"Retrying after {delay}s (attempt {attempt + 1})")
+                    time.sleep(delay)
+                    continue
+                
+                # Don't retry on client errors
+                return response
+                
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise
+                
+                delay = 2 ** attempt
+                time.sleep(delay)
+```
+</CodeGroup>
+
+### 2. Cache Responses
+
+Cache responses to reduce API calls:
+
+<CodeGroup>
+```javascript JavaScript
+class CachedAPIClient {
+  constructor() {
+    this.cache = new Map();
+  }
+  
+  async get(url, ttl = 60000) {
+    const cached = this.cache.get(url);
+    
+    if (cached && Date.now() - cached.timestamp < ttl) {
+      console.log('Returning cached response');
+      return cached.data;
+    }
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    this.cache.set(url, {
+      data,
+      timestamp: Date.now()
+    });
+    
+    return data;
+  }
+  
+  invalidate(url) {
+    this.cache.delete(url);
+  }
+  
+  clear() {
+    this.cache.clear();
+  }
+}
+```
+</CodeGroup>
+
+### 3. Batch Requests
+
+Where possible, batch multiple operations into a single request:
+
+<CodeGroup>
+```javascript Bad Practice ❌
+// Making 100 individual requests
+for (const id of vehicleIds) {
+  await fetch(`/api/vehicles/${id}`);
+}
+```
+
+```javascript Good Practice ✅
+// Single request with query parameters
+const ids = vehicleIds.join(',');
+const response = await fetch(`/api/vehicles?ids=${ids}`);
+```
+</CodeGroup>
+
+### 4. Use Webhooks Instead of Polling
+
+For real-time updates, use webhooks or WebSockets instead of polling:
+
+<CodeGroup>
+```javascript Bad Practice ❌
+// Polling every second
+setInterval(async () => {
+  const status = await fetch('/api/trips/123/status');
+  updateUI(status);
+}, 1000);
+```
+
+```javascript Good Practice ✅
+// WebSocket connection
+const ws = new WebSocket('wss://api.masareagle.com/trips/123');
+ws.onmessage = (event) => {
+  const status = JSON.parse(event.data);
+  updateUI(status);
+};
+```
+</CodeGroup>
+
+### 5. Monitor Your Usage
+
+Track your API usage to identify optimization opportunities:
+
+<CodeGroup>
+```javascript JavaScript
+class APIMonitor {
+  constructor() {
+    this.metrics = {
+      requests: 0,
+      errors: 0,
+      totalTime: 0
+    };
+  }
+  
+  async track(request) {
+    const start = Date.now();
+    this.metrics.requests++;
+    
+    try {
+      const response = await request();
+      this.metrics.totalTime += Date.now() - start;
+      return response;
+    } catch (error) {
+      this.metrics.errors++;
+      throw error;
+    }
+  }
+  
+  getStats() {
+    return {
+      ...this.metrics,
+      averageTime: this.metrics.totalTime / this.metrics.requests,
+      errorRate: this.metrics.errors / this.metrics.requests
+    };
+  }
+}
+```
+</CodeGroup>
+
+## Request Throttling Example
+
+Implement client-side throttling to stay within limits:
+
+<CodeGroup>
+```javascript JavaScript - Request Queue
+class ThrottledAPIClient {
+  constructor(requestsPerMinute = 60) {
+    this.queue = [];
+    this.processing = false;
+    this.interval = 60000 / requestsPerMinute;
+  }
+  
+  async request(url, options) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ url, options, resolve, reject });
+      this.processQueue();
+    });
+  }
+  
+  async processQueue() {
+    if (this.processing || this.queue.length === 0) {
+      return;
+    }
+    
+    this.processing = true;
+    const { url, options, resolve, reject } = this.queue.shift();
+    
+    try {
+      const response = await fetch(url, options);
+      resolve(response);
+    } catch (error) {
+      reject(error);
+    }
+    
+    setTimeout(() => {
+      this.processing = false;
+      this.processQueue();
+    }, this.interval);
+  }
+}
+
+// Usage
+const client = new ThrottledAPIClient(100); // 100 requests/minute
+
+// These will be automatically throttled
+for (let i = 0; i < 200; i++) {
+  client.request('/api/vehicles', { method: 'GET' });
+}
+```
+</CodeGroup>
+
+## OTP-Specific Rate Limiting
+
+Handle OTP rate limiting gracefully:
+
+<CodeGroup>
+```javascript JavaScript
+class OTPHandler {
+  constructor() {
+    this.lastResendTime = null;
+    this.resendCount = 0;
+    this.resendWindow = 30 * 60 * 1000; // 30 minutes
+  }
+  
+  canResend() {
+    const now = Date.now();
+    
+    // Check cooldown (1 minute)
+    if (this.lastResendTime && now - this.lastResendTime < 60000) {
+      return {
+        allowed: false,
+        reason: 'Please wait 1 minute before requesting a new code',
+        waitTime: 60 - Math.floor((now - this.lastResendTime) / 1000)
+      };
+    }
+    
+    // Check max resends (3 per 30 minutes)
+    if (this.resendCount >= 3) {
+      const windowExpiry = this.lastResendTime + this.resendWindow;
+      if (now < windowExpiry) {
+        return {
+          allowed: false,
+          reason: 'Maximum resend attempts reached',
+          waitTime: Math.floor((windowExpiry - now) / 1000)
+        };
+      }
+      // Reset counter after window expires
+      this.resendCount = 0;
+    }
+    
+    return { allowed: true };
+  }
+  
+  async resendOTP(phoneNumber) {
+    const canResend = this.canResend();
+    
+    if (!canResend.allowed) {
+      throw new Error(`${canResend.reason}. Wait ${canResend.waitTime} seconds.`);
+    }
+    
+    const response = await fetch('/api/auth/resend-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber })
+    });
+    
+    if (response.ok) {
+      this.lastResendTime = Date.now();
+      this.resendCount++;
+    }
+    
+    return response;
+  }
+}
+```
+</CodeGroup>
+
+## Monitoring and Alerts
+
+Set up monitoring to detect when you're approaching rate limits:
+
+<CardGroup cols={2}>
+  <Card title="Request Volume" icon="chart-line">
+    Monitor requests per minute/hour
+    
+    Alert when approaching 80% of limits
+  </Card>
+  
+  <Card title="Error Rates" icon="triangle-exclamation">
+    Track 429 and 5xx responses
+    
+    Alert on error rate spikes
+  </Card>
+  
+  <Card title="Response Times" icon="clock">
+    Monitor average response times
+    
+    Detect performance degradation
+  </Card>
+  
+  <Card title="Queue Depth" icon="list">
+    Track request queue length
+    
+    Alert on sustained high queue depth
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+If you encounter rate limiting issues:
+
+1. **Review your integration** - Ensure you're following best practices
+2. **Check for inefficiencies** - Look for unnecessary API calls or polling
+3. **Implement caching** - Cache responses where appropriate
+4. **Contact support** - Reach out if you have legitimate needs for higher limits
+
+<Info>
+Rate limit increases may be available for production integrations with demonstrated need. Contact your account manager for more information.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/api/error-handling">
+    Learn how to handle API errors
+  </Card>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Understand authentication flows
+  </Card>
+</CardGroup>

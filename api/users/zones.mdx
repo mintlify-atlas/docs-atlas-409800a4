@@ -1,0 +1,722 @@
+---
+title: 'Zones & Cities'
+description: 'Manage geographic zones and cities for trip routing in Masar Eagle'
+icon: 'map-location-dot'
+---
+
+## Overview
+
+The Zones & Cities API provides endpoints for managing geographic boundaries, zones, and cities used in trip planning and routing. Zones represent larger geographic areas (like provinces or regions), while cities are specific locations within zones.
+
+## Authentication
+
+Most endpoints require authentication. Admin endpoints require admin role. Include the JWT token in the Authorization header:
+
+```bash
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+---
+
+# Zones
+
+## Get All Zones
+
+<api-endpoint method="GET" endpoint="/api/admin/zones" />
+
+Retrieve all zones with pagination, search, and filtering options.
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Number of items per page (max 100)
+</ParamField>
+
+<ParamField query="Search" type="string" optional>
+  Search zones by name
+</ParamField>
+
+<ParamField query="IsActive" type="boolean" optional>
+  Filter by active status
+</ParamField>
+
+<ParamField query="SortBy" type="string" default="name">
+  Sort field: `name`, `created`, or `active`
+</ParamField>
+
+<ParamField query="SortOrder" type="string" default="asc">
+  Sort order: `asc` or `desc`
+</ParamField>
+
+### Response
+
+<ResponseField name="Zones" type="array">
+  List of zones
+  <expandable>
+    <ResponseField name="Id" type="string">
+      Zone unique identifier
+    </ResponseField>
+    <ResponseField name="Name" type="string">
+      Zone name (e.g., "Riyadh Province", "Eastern Province")
+    </ResponseField>
+    <ResponseField name="AllowIntraZoneTransport" type="boolean">
+      Whether trips within the zone are allowed
+    </ResponseField>
+    <ResponseField name="CountryCode" type="string" nullable>
+      ISO country code (e.g., "SA", "AE")
+    </ResponseField>
+    <ResponseField name="IsActive" type="boolean">
+      Active status
+    </ResponseField>
+    <ResponseField name="CreatedAt" type="datetime">
+      Creation timestamp
+    </ResponseField>
+    <ResponseField name="UpdatedAt" type="datetime" nullable>
+      Last update timestamp
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="TotalCount" type="integer">
+  Total number of zones
+</ResponseField>
+
+<ResponseField name="Page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="PageSize" type="integer">
+  Items per page
+</ResponseField>
+
+<ResponseField name="TotalPages" type="integer">
+  Total number of pages
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/zones?Page=1&PageSize=20&IsActive=true&SortBy=name&SortOrder=asc" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "Zones": [
+    {
+      "Id": "z_001",
+      "Name": "منطقة الرياض",
+      "AllowIntraZoneTransport": true,
+      "CountryCode": "SA",
+      "IsActive": true,
+      "CreatedAt": "2024-01-01T00:00:00Z",
+      "UpdatedAt": "2024-02-15T10:00:00Z"
+    },
+    {
+      "Id": "z_002",
+      "Name": "المنطقة الشرقية",
+      "AllowIntraZoneTransport": true,
+      "CountryCode": "SA",
+      "IsActive": true,
+      "CreatedAt": "2024-01-01T00:00:00Z",
+      "UpdatedAt": null
+    }
+  ],
+  "TotalCount": 2,
+  "Page": 1,
+  "PageSize": 20,
+  "TotalPages": 1
+}
+```
+
+---
+
+## Get Zone by ID
+
+<api-endpoint method="GET" endpoint="/api/admin/zones/{zoneId}" />
+
+Retrieve detailed information about a specific zone.
+
+### Path Parameters
+
+<ParamField path="zoneId" type="string" required>
+  Zone unique identifier
+</ParamField>
+
+### Response
+
+Returns a single zone object with the same structure as in the zones list.
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/admin/zones/z_001" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Create Zone
+
+<api-endpoint method="POST" endpoint="/api/admin/zones" />
+
+Create a new zone. **Admin only**.
+
+### Request Body
+
+<ParamField body="Name" type="string" required>
+  Zone name (2-100 characters)
+</ParamField>
+
+<ParamField body="AllowIntraZoneTransport" type="boolean" default="false">
+  Whether trips within the zone are allowed
+</ParamField>
+
+<ParamField body="CountryCode" type="string" optional>
+  ISO country code (2 characters, e.g., "SA", "AE")
+</ParamField>
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Created zone ID
+</ResponseField>
+
+<ResponseField name="Name" type="string">
+  Zone name
+</ResponseField>
+
+<ResponseField name="AllowIntraZoneTransport" type="boolean">
+  Intra-zone transport setting
+</ResponseField>
+
+<ResponseField name="CountryCode" type="string" nullable>
+  Country code
+</ResponseField>
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/admin/zones" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "منطقة مكة المكرمة",
+    "AllowIntraZoneTransport": true,
+    "CountryCode": "SA"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "Id": "z_003",
+  "Name": "منطقة مكة المكرمة",
+  "AllowIntraZoneTransport": true,
+  "CountryCode": "SA",
+  "Message": "تم إنشاء المنطقة بنجاح"
+}
+```
+
+---
+
+## Update Zone
+
+<api-endpoint method="PUT" endpoint="/api/admin/zones/{zoneId}" />
+
+Update zone information. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="zoneId" type="string" required>
+  Zone unique identifier
+</ParamField>
+
+### Request Body
+
+<ParamField body="Name" type="string" optional>
+  Updated zone name
+</ParamField>
+
+<ParamField body="AllowIntraZoneTransport" type="boolean" optional>
+  Updated intra-zone transport setting
+</ParamField>
+
+<ParamField body="CountryCode" type="string" optional>
+  Updated country code
+</ParamField>
+
+<ParamField body="IsActive" type="boolean" optional>
+  Updated active status
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/admin/zones/z_003" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "منطقة مكة المكرمة - محدث",
+    "IsActive": true
+  }'
+```
+
+---
+
+## Delete Zone
+
+<api-endpoint method="DELETE" endpoint="/api/admin/zones/{zoneId}" />
+
+Soft delete a zone. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="zoneId" type="string" required>
+  Zone unique identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/admin/zones/z_003" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Validate Travel Between Zones
+
+<api-endpoint method="POST" endpoint="/api/zones/validate-travel" />
+
+Validate if travel is allowed between two locations (origin and destination zones).
+
+### Request Body
+
+<ParamField body="OriginZoneId" type="string" required>
+  Origin zone ID
+</ParamField>
+
+<ParamField body="DestinationZoneId" type="string" required>
+  Destination zone ID
+</ParamField>
+
+### Response
+
+<ResponseField name="IsAllowed" type="boolean">
+  Whether travel is allowed between zones
+</ResponseField>
+
+<ResponseField name="Message" type="string">
+  Explanation message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/zones/validate-travel" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "OriginZoneId": "z_001",
+    "DestinationZoneId": "z_002"
+  }'
+```
+
+---
+
+# Cities
+
+## Get All Cities
+
+<api-endpoint method="GET" endpoint="/api/cities" />
+
+Retrieve all cities with pagination, search, and filtering. **Public endpoint**.
+
+### Query Parameters
+
+<ParamField query="Page" type="integer" default="1">
+  Page number
+</ParamField>
+
+<ParamField query="PageSize" type="integer" default="20">
+  Items per page (max 100)
+</ParamField>
+
+<ParamField query="Search" type="string" optional>
+  Search cities by name
+</ParamField>
+
+<ParamField query="IsActive" type="boolean" optional>
+  Filter by active status
+</ParamField>
+
+<ParamField query="ZoneId" type="string" optional>
+  Filter by zone ID
+</ParamField>
+
+<ParamField query="SortBy" type="string" default="name">
+  Sort field: `name`, `created`, or `active`
+</ParamField>
+
+<ParamField query="SortOrder" type="string" default="asc">
+  Sort order: `asc` or `desc`
+</ParamField>
+
+### Response
+
+<ResponseField name="Cities" type="array">
+  List of cities
+  <expandable>
+    <ResponseField name="Id" type="string">
+      City unique identifier
+    </ResponseField>
+    <ResponseField name="Name" type="string">
+      City name
+    </ResponseField>
+    <ResponseField name="Latitude" type="decimal" nullable>
+      City latitude coordinate
+    </ResponseField>
+    <ResponseField name="Longitude" type="decimal" nullable>
+      City longitude coordinate
+    </ResponseField>
+    <ResponseField name="ZoneId" type="string" nullable>
+      Associated zone ID
+    </ResponseField>
+    <ResponseField name="ZoneName" type="string" nullable>
+      Associated zone name
+    </ResponseField>
+    <ResponseField name="BoundingBox" type="array" nullable>
+      Geographic bounding box [minLat, minLon, maxLat, maxLon]
+    </ResponseField>
+    <ResponseField name="GeoJson" type="string" nullable>
+      GeoJSON representation of city boundaries
+    </ResponseField>
+    <ResponseField name="Importance" type="decimal" nullable>
+      City importance ranking (0-1)
+    </ResponseField>
+    <ResponseField name="IsActive" type="boolean">
+      Active status
+    </ResponseField>
+    <ResponseField name="CreatedAt" type="datetime">
+      Creation timestamp
+    </ResponseField>
+    <ResponseField name="UpdatedAt" type="datetime" nullable>
+      Last update timestamp
+    </ResponseField>
+  </expandable>
+</ResponseField>
+
+<ResponseField name="TotalCount" type="integer">
+  Total number of cities
+</ResponseField>
+
+<ResponseField name="Page" type="integer">
+  Current page
+</ResponseField>
+
+<ResponseField name="PageSize" type="integer">
+  Items per page
+</ResponseField>
+
+<ResponseField name="TotalPages" type="integer">
+  Total pages
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/cities?Page=1&PageSize=20&ZoneId=z_001&IsActive=true"
+```
+
+### Example Response
+
+```json
+{
+  "Cities": [
+    {
+      "Id": "c_001",
+      "Name": "الرياض",
+      "Latitude": 24.7136,
+      "Longitude": 46.6753,
+      "ZoneId": "z_001",
+      "ZoneName": "منطقة الرياض",
+      "BoundingBox": [24.4, 46.4, 25.0, 47.0],
+      "GeoJson": null,
+      "Importance": 1.0,
+      "IsActive": true,
+      "CreatedAt": "2024-01-01T00:00:00Z",
+      "UpdatedAt": null
+    }
+  ],
+  "TotalCount": 1,
+  "Page": 1,
+  "PageSize": 20,
+  "TotalPages": 1
+}
+```
+
+---
+
+## Get City by ID
+
+<api-endpoint method="GET" endpoint="/api/cities/{cityId}" />
+
+Retrieve detailed information about a specific city.
+
+### Path Parameters
+
+<ParamField path="cityId" type="string" required>
+  City unique identifier
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/cities/c_001"
+```
+
+---
+
+## Create City
+
+<api-endpoint method="POST" endpoint="/api/cities" />
+
+Create a new city. **Admin only**.
+
+### Request Body
+
+<ParamField body="Name" type="string" required>
+  City name (2-100 characters)
+</ParamField>
+
+<ParamField body="Latitude" type="decimal" optional>
+  City latitude (-90 to 90)
+</ParamField>
+
+<ParamField body="Longitude" type="decimal" optional>
+  City longitude (-180 to 180)
+</ParamField>
+
+<ParamField body="ZoneId" type="string" optional>
+  Associated zone ID
+</ParamField>
+
+<ParamField body="BoundingBox" type="array" optional>
+  Geographic bounding box [minLat, minLon, maxLat, maxLon]
+</ParamField>
+
+<ParamField body="GeoJson" type="string" optional>
+  GeoJSON string representing city boundaries
+</ParamField>
+
+<ParamField body="Importance" type="decimal" optional>
+  City importance (0.0 to 1.0)
+</ParamField>
+
+### Response
+
+<ResponseField name="Id" type="string">
+  Created city ID
+</ResponseField>
+
+<ResponseField name="Name" type="string">
+  City name
+</ResponseField>
+
+<ResponseField name="Message" type="string">
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagles.com/api/cities" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "جدة",
+    "Latitude": 21.5433,
+    "Longitude": 39.1728,
+    "ZoneId": "z_002",
+    "BoundingBox": [21.3, 39.0, 21.8, 39.4],
+    "Importance": 0.95
+  }'
+```
+
+---
+
+## Update City
+
+<api-endpoint method="PUT" endpoint="/api/cities/{cityId}" />
+
+Update city information. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="cityId" type="string" required>
+  City unique identifier
+</ParamField>
+
+### Request Body
+
+Same parameters as Create City, all optional.
+
+<ParamField body="IsActive" type="boolean" optional>
+  Set city active status
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X PUT "https://api.masareagles.com/api/cities/c_001" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "الرياض - محدث",
+    "Importance": 1.0,
+    "IsActive": true
+  }'
+```
+
+---
+
+## Delete City
+
+<api-endpoint method="DELETE" endpoint="/api/cities/{cityId}" />
+
+Soft delete a city. **Admin only**.
+
+### Path Parameters
+
+<ParamField path="cityId" type="string" required>
+  City unique identifier
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X DELETE "https://api.masareagles.com/api/cities/c_001" \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
+```
+
+---
+
+## Get Cities for Map
+
+<api-endpoint method="GET" endpoint="/api/cities/map" />
+
+Get cities optimized for map display with minimal data.
+
+### Response
+
+Returns a simplified list of cities with only essential fields: ID, Name, Latitude, Longitude, IsActive.
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/cities/map"
+```
+
+---
+
+## Get Available Destinations
+
+<api-endpoint method="GET" endpoint="/api/cities/available-destinations" />
+
+Get available destination cities from a specific origin city.
+
+### Query Parameters
+
+<ParamField query="OriginCityId" type="string" required>
+  Origin city ID
+</ParamField>
+
+### Response
+
+<ResponseField name="AvailableDestinations" type="array">
+  List of reachable destination cities
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagles.com/api/cities/available-destinations?OriginCityId=c_001"
+```
+
+---
+
+## Error Responses
+
+All endpoints may return the following error responses:
+
+<ResponseField name="message" type="string">
+  Error message in Arabic or English
+</ResponseField>
+
+<ResponseField name="errors" type="array" optional>
+  Detailed validation errors
+</ResponseField>
+
+### Common Error Codes
+
+- `400 Bad Request` - Invalid request parameters or validation errors
+- `401 Unauthorized` - Missing or invalid authentication token
+- `403 Forbidden` - Insufficient permissions (admin role required)
+- `404 Not Found` - Zone or city not found
+- `409 Conflict` - Duplicate zone/city name
+- `500 Internal Server Error` - Server error
+
+### Example Error Response
+
+```json
+{
+  "message": "فشل التحقق من صحة البيانات",
+  "errors": [
+    {
+      "field": "Name",
+      "message": "اسم المنطقة مطلوب"
+    }
+  ]
+}
+```
+
+---
+
+## Notes
+
+### Zone Validation
+
+- Zones control inter-city travel permissions
+- `AllowIntraZoneTransport` determines if trips within the same zone are allowed
+- Cross-zone travel is validated using the `/zones/validate-travel` endpoint
+
+### City Boundaries
+
+- Cities can have both simple coordinates (Latitude/Longitude) and complex boundaries (GeoJSON)
+- `BoundingBox` provides a simple rectangular boundary for quick filtering
+- `GeoJson` provides precise polygon boundaries for accurate location checking
+- `Importance` helps prioritize cities in autocomplete and search results
+
+### Best Practices
+
+1. **Always validate travel** between cities before creating trips
+2. **Use bounding boxes** for initial filtering, then GeoJSON for precise validation
+3. **Cache city and zone data** in client applications to reduce API calls
+4. **Sort by importance** when displaying city search results to users

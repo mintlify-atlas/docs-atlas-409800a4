@@ -1,0 +1,490 @@
+---
+title: 'Search Trips'
+description: 'Unified trip search endpoint for driver and company trips'
+---
+
+## Unified Trip Search
+
+Search for available trips across both driver-created trips and company trips. Returns a unified list with trip type discriminators.
+
+<CodeGroup>
+```bash cURL - Basic Search
+curl -X GET "https://api.masareagles.com/api/trips/search/unified?from=Riyadh&to=Jeddah&dateFrom=2026-03-15T00:00:00Z" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```bash cURL - Advanced Search
+curl -X GET "https://api.masareagles.com/api/trips/search/unified?from=Riyadh&to=Jeddah&dateFrom=2026-03-15T00:00:00Z&dateTo=2026-03-16T23:59:59Z&minPrice=50&maxPrice=200&requiredSeats=2&tripType=all" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```bash cURL - Company Trips Only
+curl -X GET "https://api.masareagles.com/api/trips/search/unified?from=Makkah&to=Madinah&tripType=company" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  GET
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/trips/search/unified`
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="from" type="string">
+  Origin city or location name to filter trips
+</ParamField>
+
+<ParamField query="to" type="string">
+  Destination city or location name to filter trips
+</ParamField>
+
+<ParamField query="dateFrom" type="string">
+  Start of date range for trip departure (ISO 8601 format)
+</ParamField>
+
+<ParamField query="dateTo" type="string">
+  End of date range for trip departure (ISO 8601 format)
+</ParamField>
+
+<ParamField query="minPrice" type="decimal">
+  Minimum price filter
+</ParamField>
+
+<ParamField query="maxPrice" type="decimal">
+  Maximum price filter
+</ParamField>
+
+<ParamField query="requiredSeats" type="integer">
+  Minimum number of available seats required
+</ParamField>
+
+<ParamField query="tripType" type="string">
+  Filter by trip type:
+  - `driver` - Only driver-created trips
+  - `company` - Only company trips
+  - `all` - Both types (default)
+</ParamField>
+
+### Response
+
+<ResponseField name="trips" type="array">
+  Array of trip results. Each trip includes a `tripType` discriminator field.
+  
+  <Expandable title="Driver Trip Result">
+    <ResponseField name="tripType" type="string">
+      Value: `"Driver"`
+    </ResponseField>
+    
+    <ResponseField name="id" type="string">
+      Trip identifier
+    </ResponseField>
+    
+    <ResponseField name="from" type="string">
+      Origin location
+    </ResponseField>
+    
+    <ResponseField name="to" type="string">
+      Destination location
+    </ResponseField>
+    
+    <ResponseField name="departureTime" type="string">
+      Departure date/time
+    </ResponseField>
+    
+    <ResponseField name="arrivalTime" type="string">
+      Arrival date/time
+    </ResponseField>
+    
+    <ResponseField name="price" type="decimal">
+      Price per seat
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string">
+      Currency code
+    </ResponseField>
+    
+    <ResponseField name="currencyInfo" type="object">
+      Detailed currency information (code, symbol, name)
+    </ResponseField>
+    
+    <ResponseField name="totalSeats" type="integer">
+      Total seat capacity
+    </ResponseField>
+    
+    <ResponseField name="availableSeats" type="integer">
+      Currently available seats
+    </ResponseField>
+    
+    <ResponseField name="driverId" type="string">
+      Driver identifier
+    </ResponseField>
+    
+    <ResponseField name="driverName" type="string">
+      Driver name
+    </ResponseField>
+    
+    <ResponseField name="driverImage" type="string">
+      Driver profile image URL
+    </ResponseField>
+    
+    <ResponseField name="driverRating" type="decimal">
+      Driver average rating (0-5)
+    </ResponseField>
+    
+    <ResponseField name="driverTotalReviews" type="integer">
+      Total number of driver reviews
+    </ResponseField>
+    
+    <ResponseField name="vehicleId" type="string">
+      Vehicle identifier
+    </ResponseField>
+    
+    <ResponseField name="vehicleModel" type="string">
+      Vehicle model name
+    </ResponseField>
+    
+    <ResponseField name="vehicleImageUrl" type="string">
+      Vehicle image URL
+    </ResponseField>
+    
+    <ResponseField name="vehicleDescription" type="string">
+      Vehicle description
+    </ResponseField>
+    
+    <ResponseField name="fromLatitude" type="double">
+      Origin latitude
+    </ResponseField>
+    
+    <ResponseField name="fromLongitude" type="double">
+      Origin longitude
+    </ResponseField>
+    
+    <ResponseField name="toLatitude" type="double">
+      Destination latitude
+    </ResponseField>
+    
+    <ResponseField name="toLongitude" type="double">
+      Destination longitude
+    </ResponseField>
+    
+    <ResponseField name="stops" type="array">
+      Array of intermediate stops with name, coordinates, and order
+    </ResponseField>
+  </Expandable>
+  
+  <Expandable title="Company Trip Result">
+    <ResponseField name="tripType" type="string">
+      Value: `"Company"`
+    </ResponseField>
+    
+    <ResponseField name="id" type="string">
+      Trip identifier
+    </ResponseField>
+    
+    <ResponseField name="from" type="string">
+      Origin location
+    </ResponseField>
+    
+    <ResponseField name="to" type="string">
+      Destination location
+    </ResponseField>
+    
+    <ResponseField name="departureTime" type="string">
+      Departure date/time
+    </ResponseField>
+    
+    <ResponseField name="price" type="decimal">
+      Trip price
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string">
+      Currency code
+    </ResponseField>
+    
+    <ResponseField name="currencyInfo" type="object">
+      Detailed currency information
+    </ResponseField>
+    
+    <ResponseField name="totalSeats" type="integer">
+      Total available bookings
+    </ResponseField>
+    
+    <ResponseField name="availableSeats" type="integer">
+      Remaining booking slots
+    </ResponseField>
+    
+    <ResponseField name="companyId" type="string">
+      Company identifier
+    </ResponseField>
+    
+    <ResponseField name="companyName" type="string">
+      Company name
+    </ResponseField>
+    
+    <ResponseField name="companyLogo" type="string">
+      Company logo URL
+    </ResponseField>
+    
+    <ResponseField name="companyRating" type="decimal">
+      Company average rating
+    </ResponseField>
+    
+    <ResponseField name="companyReviewsCount" type="integer">
+      Total company reviews
+    </ResponseField>
+    
+    <ResponseField name="driverId" type="string">
+      Assigned driver ID (for public trips)
+    </ResponseField>
+    
+    <ResponseField name="driverName" type="string">
+      Assigned driver name
+    </ResponseField>
+    
+    <ResponseField name="driverPhoto" type="string">
+      Driver photo URL
+    </ResponseField>
+    
+    <ResponseField name="vehicleId" type="string">
+      Vehicle identifier
+    </ResponseField>
+    
+    <ResponseField name="vehicleModel" type="string">
+      Vehicle model
+    </ResponseField>
+    
+    <ResponseField name="vehicleImageUrl" type="string">
+      Vehicle image URL
+    </ResponseField>
+    
+    <ResponseField name="fromCityId" type="string">
+      Origin city identifier
+    </ResponseField>
+    
+    <ResponseField name="fromAddress" type="string">
+      Origin address
+    </ResponseField>
+    
+    <ResponseField name="toCityId" type="string">
+      Destination city identifier
+    </ResponseField>
+    
+    <ResponseField name="toAddress" type="string">
+      Destination address
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Trip description
+    </ResponseField>
+    
+    <ResponseField name="status" type="string">
+      Trip status
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalCount" type="integer">
+  Total number of trips found
+</ResponseField>
+
+<ResponseField name="driverTripsCount" type="integer">
+  Number of driver trips in results
+</ResponseField>
+
+<ResponseField name="companyTripsCount" type="integer">
+  Number of company trips in results
+</ResponseField>
+
+<ResponseExample>
+```json Success Response
+{
+  "trips": [
+    {
+      "tripType": "Driver",
+      "id": "trip_abc123",
+      "from": "Riyadh",
+      "to": "Jeddah",
+      "departureTime": "2026-03-15T08:00:00Z",
+      "arrivalTime": "2026-03-15T16:00:00Z",
+      "price": 150.00,
+      "currency": "SAR",
+      "currencyInfo": {
+        "code": "SAR",
+        "symbol": "ر.س",
+        "nameAr": "ريال سعودي",
+        "nameEn": "Saudi Riyal"
+      },
+      "totalSeats": 3,
+      "availableSeats": 2,
+      "driverId": "drv_xyz789",
+      "driverName": "Ahmed Al-Salem",
+      "driverImage": "https://cdn.example.com/drivers/ahmed.jpg",
+      "driverRating": 4.8,
+      "driverTotalReviews": 127,
+      "vehicleId": "veh_abc123",
+      "vehicleModel": "Toyota Camry 2024",
+      "vehicleImageUrl": "https://cdn.example.com/vehicles/camry.jpg",
+      "vehicleDescription": "Comfortable sedan with AC",
+      "fromLatitude": 24.7136,
+      "fromLongitude": 46.6753,
+      "toLatitude": 21.5433,
+      "toLongitude": 39.1728,
+      "stops": [
+        {
+          "name": "Buraydah",
+          "latitude": 26.3260,
+          "longitude": 43.9751,
+          "order": 1
+        }
+      ]
+    },
+    {
+      "tripType": "Company",
+      "id": "comptrip_def456",
+      "from": "Riyadh",
+      "to": "Jeddah",
+      "departureTime": "2026-03-15T09:00:00Z",
+      "price": 180.00,
+      "currency": "SAR",
+      "currencyInfo": {
+        "code": "SAR",
+        "symbol": "ر.س",
+        "nameAr": "ريال سعودي",
+        "nameEn": "Saudi Riyal"
+      },
+      "totalSeats": 10,
+      "availableSeats": 7,
+      "companyId": "comp_xyz123",
+      "companyName": "Eagle Express Transport",
+      "companyLogo": "https://cdn.example.com/companies/eagle.png",
+      "companyRating": 4.6,
+      "companyReviewsCount": 543,
+      "driverId": "drv_comp456",
+      "driverName": "Mohammed Al-Otaibi",
+      "driverPhoto": "https://cdn.example.com/drivers/mohammed.jpg",
+      "vehicleId": "veh_bus789",
+      "vehicleModel": "Mercedes Sprinter",
+      "vehicleImageUrl": "https://cdn.example.com/vehicles/sprinter.jpg",
+      "fromCityId": "city_riyadh",
+      "fromAddress": "King Khalid International Airport",
+      "toCityId": "city_jeddah",
+      "toAddress": "King Abdulaziz International Airport",
+      "description": "Direct luxury service",
+      "status": "Active"
+    }
+  ],
+  "totalCount": 2,
+  "driverTripsCount": 1,
+  "companyTripsCount": 1
+}
+```
+</ResponseExample>
+
+---
+
+## Legacy Search Trips
+
+Search for driver trips only (legacy endpoint). For unified search including company trips, use the Unified Trip Search endpoint above.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.masareagles.com/api/trips/search?from=Riyadh&to=Dammam&dateFrom=2026-03-15T00:00:00Z&minPrice=50&maxPrice=200" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Endpoint
+
+<ParamField path="method" type="string" required>
+  GET
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  `/api/trips/search`
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="from" type="string">
+  Origin location filter
+</ParamField>
+
+<ParamField query="to" type="string">
+  Destination location filter
+</ParamField>
+
+<ParamField query="dateFrom" type="string">
+  Start date for search range
+</ParamField>
+
+<ParamField query="dateTo" type="string">
+  End date for search range
+</ParamField>
+
+<ParamField query="minPrice" type="decimal">
+  Minimum price filter
+</ParamField>
+
+<ParamField query="maxPrice" type="decimal">
+  Maximum price filter
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Indicates search success
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Result message
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Search results container
+  
+  <Expandable title="Data Object">
+    <ResponseField name="trips" type="array">
+      Array of driver trip objects (same structure as driver trips in unified search)
+    </ResponseField>
+    
+    <ResponseField name="totalCount" type="integer">
+      Total number of trips found
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json Success Response
+{
+  "success": true,
+  "message": "تم العثور على الرحلات",
+  "data": {
+    "trips": [
+      {
+        "id": "trip_abc123",
+        "from": "Riyadh",
+        "to": "Dammam",
+        "departureTimeUtc": "2026-03-15T10:00:00Z",
+        "price": 120.00,
+        "currency": "SAR",
+        "availableSeats": 3,
+        "driverId": "drv_xyz789",
+        "driverName": "Fahad Al-Qahtani",
+        "driverRating": 4.7
+      }
+    ],
+    "totalCount": 1
+  }
+}
+```
+</ResponseExample>
+
+<Info>
+For new integrations, use the **Unified Trip Search** endpoint (`/api/trips/search/unified`) to search across both driver and company trips.
+</Info>

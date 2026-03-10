@@ -1,0 +1,204 @@
+---
+title: 'Passenger Wallet'
+description: 'Manage passenger wallet operations including balance queries and deposits'
+---
+
+## Get Passenger Wallets
+
+Retrieve a paginated list of all passenger wallets with optional currency filtering.
+
+<Note>
+This endpoint requires admin authorization.
+</Note>
+
+```bash
+GET /api/admin/wallets/passengers
+```
+
+### Query Parameters
+
+<ParamField query="currency" type="string">
+  Filter wallets by currency code (e.g., SAR, EGP) or symbol. Optional.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination. Must be greater than 0.
+</ParamField>
+
+<ParamField query="pageSize" type="integer" default="20">
+  Number of items per page. Must be between 1 and 100.
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="wallets" type="array">
+  Array of passenger wallet items
+  
+  <Expandable title="wallet object">
+    <ResponseField name="userId" type="string" required>
+      Passenger's unique user ID
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Passenger's full name (defaults to "غير معروف" if unavailable)
+    </ResponseField>
+    
+    <ResponseField name="phoneNumber" type="string" required>
+      Passenger's phone number
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string" required>
+      Wallet currency code (SAR, EGP, etc.)
+    </ResponseField>
+    
+    <ResponseField name="walletBalance" type="decimal" required>
+      Current available balance in wallet
+    </ResponseField>
+    
+    <ResponseField name="lastUpdatedAt" type="datetime">
+      Timestamp of last wallet update
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalCount" type="integer">
+  Total number of passenger wallets matching the filter
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="pageSize" type="integer">
+  Items per page
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total pages available
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagle.sa/api/admin/wallets/passengers?currency=SAR&page=1&pageSize=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "wallets": [
+    {
+      "userId": "passenger_456",
+      "name": "فاطمة علي",
+      "phoneNumber": "+966507654321",
+      "currency": "SAR",
+      "walletBalance": 350.75,
+      "lastUpdatedAt": "2026-03-10T09:15:00Z"
+    }
+  ],
+  "totalCount": 120,
+  "page": 1,
+  "pageSize": 20,
+  "totalPages": 6
+}
+```
+
+---
+
+## Deposit to Passenger Wallet
+
+Add funds to a passenger's wallet (admin operation).
+
+```bash
+POST /api/admin/passengers/{passengerId}/wallet/deposit
+```
+
+### Path Parameters
+
+<ParamField path="passengerId" type="string" required>
+  The passenger's unique user ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="amount" type="decimal" required>
+  Amount to deposit. Must be positive.
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (SAR, EGP, etc.) or symbol
+</ParamField>
+
+<ParamField body="transferReference" type="string">
+  Optional bank transfer or transaction reference number
+</ParamField>
+
+<ParamField body="notes" type="string">
+  Optional admin notes for this deposit
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if deposit was successful
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success or error message in Arabic
+</ResponseField>
+
+<ResponseField name="newBalance" type="decimal">
+  Passenger's new wallet balance after deposit
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/passengers/passenger_456/wallet/deposit" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 200.00,
+    "currency": "SAR",
+    "transferReference": "REF20260310123",
+    "notes": "Refund for cancelled trip"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "message": "تم إيداع 200.00 SAR بنجاح",
+  "newBalance": 550.75
+}
+```
+
+<Info>
+A wallet deposit notification is automatically sent to the passenger upon successful deposit. The transaction is recorded with admin as the performer.
+</Info>
+
+### Transaction Details
+
+Each deposit creates a wallet transaction record with:
+- **Transaction Type**: Deposit
+- **Reference Type**: Transfer
+- **Performed By**: Admin user ID
+- **Notes**: Admin-provided notes or default message
+
+### Error Handling
+
+```json
+{
+  "success": false,
+  "message": "محفظة الراكب غير موجودة",
+  "newBalance": null
+}
+```
+
+<Warning>
+Passenger wallets are automatically created when they book their first trip. If a wallet doesn't exist, the deposit operation will fail.
+</Warning>

@@ -1,0 +1,755 @@
+---
+title: Docker Deployment
+description: Deploy Masar Eagle using Docker Compose
+icon: docker
+---
+
+## Overview
+
+This guide explains how to deploy Masar Eagle using Docker Compose. This method is ideal for production deployments, staging environments, or running the full stack locally.
+
+<Note>
+  This deployment method uses Docker containers for all services, databases, and monitoring tools.
+</Note>
+
+## Prerequisites
+
+<Steps>
+  <Step title="Verify Docker Installation">
+    ```bash
+    docker --version
+    # Docker version 24.0+ required
+    
+    docker compose version
+    # Docker Compose v2.20+ required
+    ```
+  </Step>
+  
+  <Step title="Check System Resources">
+    Ensure your system has:
+    - **RAM**: 8GB minimum (16GB recommended)
+    - **Storage**: 20GB free space
+    - **CPU**: 4+ cores
+  </Step>
+  
+  <Step title="Configure Docker Network">
+    ```bash
+    # Create external network if needed
+    docker network create npm-network
+    ```
+  </Step>
+</Steps>
+
+## Deployment Architecture
+
+Docker deployment includes:
+
+<CardGroup cols={2}>
+  <Card title="Application Services" icon="microchip">
+    - Gateway (YARP)
+    - Identity Service
+    - Users Service
+    - Trips Service
+    - Notifications Service
+  </Card>
+  
+  <Card title="Infrastructure" icon="database">
+    - PostgreSQL (with pgAdmin)
+    - RabbitMQ (with Management UI)
+    - OpenTelemetry Collector
+  </Card>
+  
+  <Card title="Monitoring Stack" icon="chart-line">
+    - Prometheus
+    - Grafana
+    - Jaeger
+    - Loki
+  </Card>
+  
+  <Card title="Persistence" icon="hard-drive">
+    - Database volumes
+    - RabbitMQ data
+    - Dashboard data
+    - Identity keys
+  </Card>
+</CardGroup>
+
+## Quick Deployment
+
+### Using the Deployment Script
+
+Masar Eagle includes a deployment script for easy setup:
+
+```bash deploy.sh
+#!/bin/bash
+# Deployment script for Masar Eagle Backend
+
+set -e
+
+ENVIRONMENT=$1
+DEPLOY_DIR="/opt/masar-eagle"
+
+if [ "$ENVIRONMENT" = "dev" ]; then
+    APP_DIR="$DEPLOY_DIR/dev"
+    COMPOSE_PROJECT_NAME="dev"
+elif [ "$ENVIRONMENT" = "prod" ]; then
+    APP_DIR="$DEPLOY_DIR/prod"
+    COMPOSE_PROJECT_NAME="prod"
+else
+    echo "Usage: $0 {dev|prod}"
+    exit 1
+fi
+
+echo "🚀 Deploying to $ENVIRONMENT environment..."
+
+# Create deployment directories
+mkdir -p "$APP_DIR"
+cd "$APP_DIR"
+
+# Ensure networks exist
+if ! docker network inspect npm-network >/dev/null 2>&1; then
+    echo "➕ Creating docker network: npm-network"
+    docker network create npm-network
+fi
+
+# Ensure volumes exist
+for volume in dashboard-data identity-keys masar-postgres-data rabbitmq-data; do
+    if ! docker volume inspect ${COMPOSE_PROJECT_NAME}_${volume} >/dev/null 2>&1; then
+        echo "➕ Creating volume: ${COMPOSE_PROJECT_NAME}_${volume}"
+        docker volume create ${COMPOSE_PROJECT_NAME}_${volume}
+    fi
+done
+
+# Deploy with Docker Compose
+docker compose -p "$COMPOSE_PROJECT_NAME" up -d --pull always --no-build
+
+echo "✅ Deployment complete!"
+docker compose -p "$COMPOSE_PROJECT_NAME" ps
+```
+
+<Steps>
+  <Step title="Make Script Executable">
+    ```bash
+    chmod +x deploy.sh
+    ```
+  </Step>
+  
+  <Step title="Deploy to Development">
+    ```bash
+    ./deploy.sh dev
+    ```
+  </Step>
+  
+  <Step title="Deploy to Production">
+    ```bash
+    ./deploy.sh prod
+    ```
+  </Step>
+</Steps>
+
+## Manual Docker Compose Setup
+
+### Generate Docker Compose File
+
+.NET Aspire can generate a production-ready `docker-compose.yml`:
+
+<Steps>
+  <Step title="Publish Aspire Project">
+    ```bash
+    cd src/aspire/AppHost
+    
+    # Generate docker-compose.yml
+    dotnet run --publisher manifest --output-path ../../../deploy/manifest.json
+    
+    # Or publish directly
+    dotnet publish \
+      --os linux \
+      --arch x64 \
+      /p:PublishProfile=DefaultContainer
+    ```
+  </Step>
+  
+  <Step title="Review Generated Files">
+    ```bash
+    ls deploy/
+    # manifest.json
+    # docker-compose.yml
+    # docker-compose.override.yml
+    ```
+  </Step>
+  
+  <Step title="Customize docker-compose.yml">
+    Edit the generated `docker-compose.yml` to add production settings:
+    
+    ```yaml
+    services:
+      gateway:
+        image: masar-eagle/gateway:latest
+        environment:
+          - ASPNETCORE_ENVIRONMENT=Production
+          - ASPNETCORE_URLS=https://+:443;http://+:80
+        ports:
+          - "80:80"
+          - "443:443"
+        volumes:
+          - ./certs:/app/certs:ro
+        restart: unless-stopped
+    ```
+  </Step>
+</Steps>
+
+### Docker Compose Configuration
+
+<CodeGroup>
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # pgAdmin
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@masar-eagle.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # OpenTelemetry Collector
+  otelcollector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcollector/config.yaml"]
+    volumes:
+      - ./otelcollector/config.yaml:/etc/otelcollector/config.yaml:ro
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+    restart: unless-stopped
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command:
+      - --web.enable-otlp-receiver
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_FEATURE_TOGGLES_ENABLE: accessControlOnCall
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    volumes:
+      - ./grafana/config:/etc/grafana:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Jaeger
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    command: ["--config=/jaeger/config.yaml"]
+    volumes:
+      - ./jaeger/config.yaml:/jaeger/config.yaml:ro
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC
+    restart: unless-stopped
+
+  # Loki
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  # Identity Service
+  identity:
+    image: masar-eagle/identity:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__auth=Host=postgres;Database=auth;Username=postgres
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+      - IDENTITY_KEYS_PATH=/keys
+    volumes:
+      - identity-keys:/keys
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Users Service
+  user:
+    image: masar-eagle/users:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__user=Host=postgres;Database=user;Username=postgres
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+    volumes:
+      - user-uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity:
+        condition: service_started
+    restart: unless-stopped
+
+  # Trips Service
+  trip:
+    image: masar-eagle/trips:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__trip=Host=postgres;Database=trip;Username=postgres
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user:
+        condition: service_started
+    restart: unless-stopped
+
+  # Notifications Service
+  notifications:
+    image: masar-eagle/notifications:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__notifications=Host=postgres;Database=notifications;Username=postgres
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user:
+        condition: service_started
+    restart: unless-stopped
+
+  # Gateway
+  gateway:
+    image: masar-eagle/gateway:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcollector:4317
+    ports:
+      - "80:8080"
+    depends_on:
+      - identity
+      - user
+      - trip
+      - notifications
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  identity-keys:
+  user-uploads:
+  dashboard-data:
+
+networks:
+  default:
+    name: masar-eagle-network
+```
+
+```yaml docker-compose.prod.yml
+# Production overrides
+version: '3.8'
+
+services:
+  gateway:
+    environment:
+      - ASPNETCORE_URLS=https://+:443;http://+:80
+    ports:
+      - "443:443"
+    volumes:
+      - ./certs/fullchain.pem:/app/certs/cert.pem:ro
+      - ./certs/privkey.pem:/app/certs/key.pem:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  identity:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  user:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  trip:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+```
+</CodeGroup>
+
+## Configuration Management
+
+### Environment Variables
+
+Create a `.env` file for environment-specific configuration:
+
+```bash .env.production
+# Environment
+ASPNETCORE_ENVIRONMENT=Production
+
+# Database
+POSTGRES_PASSWORD=your-secure-password
+POSTGRES_HOST=postgres
+
+# RabbitMQ
+RABBITMQ_DEFAULT_USER=masar-eagle
+RABBITMQ_DEFAULT_PASS=your-rabbitmq-password
+
+# JWT Configuration
+JWT_SECRET_KEY=your-64-character-secret-key-for-production-environment-change-this
+JWT_ISSUER=masareagle.identity
+JWT_AUDIENCE=masar-eagle-api
+
+# SMS Provider (Taqnyat)
+SMS_PROVIDER=Taqnyat
+TAQNYAT_BEARER_TOKEN=your-taqnyat-token
+TAQNYAT_SENDER_NAME=MasarEagle
+
+# Email (Resend)
+EMAIL_API_TOKEN=re_your_resend_token
+EMAIL_FROM=noreply@masar-eagle.com
+
+# Payment Gateway (Moyasar)
+MOYASAR_PASSENGER_SECRET_KEY=sk_live_xxx
+MOYASAR_PASSENGER_PUBLISHABLE_KEY=pk_live_xxx
+MOYASAR_DRIVER_SECRET_KEY=sk_live_xxx
+MOYASAR_COMPANY_SECRET_KEY=sk_live_xxx
+
+# Firebase
+FIREBASE_PROJECT_ID=masar-eagle-notifications
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk@project.iam.gserviceaccount.com
+```
+
+<Warning>
+  Never commit the `.env` file to version control. Add it to `.gitignore`.
+</Warning>
+
+### Docker Secrets (Recommended for Production)
+
+```bash
+# Create secrets
+echo "your-secure-password" | docker secret create postgres_password -
+echo "your-jwt-secret" | docker secret create jwt_secret -
+echo "sk_live_xxx" | docker secret create moyasar_secret -
+
+# Reference in docker-compose.yml
+services:
+  identity:
+    secrets:
+      - jwt_secret
+    environment:
+      - Jwt__SecretKey=/run/secrets/jwt_secret
+
+secrets:
+  jwt_secret:
+    external: true
+  postgres_password:
+    external: true
+  moyasar_secret:
+    external: true
+```
+
+## Volume Management
+
+### Data Persistence
+
+All data is persisted in Docker volumes:
+
+| Volume | Purpose | Backup Priority |
+|--------|---------|----------------|
+| `postgres-data` | All databases | Critical |
+| `rabbitmq-data` | Message queue state | High |
+| `identity-keys` | OpenIddict keys | Critical |
+| `user-uploads` | User uploaded files | High |
+| `dashboard-data` | Aspire dashboard | Low |
+| `grafana-data` | Grafana configs | Medium |
+
+### Backup Volumes
+
+```bash
+#!/bin/bash
+# Backup script
+
+BACKUP_DIR="/backups/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# Backup PostgreSQL
+docker exec prod-postgres-1 pg_dumpall -U postgres | gzip > "$BACKUP_DIR/postgres.sql.gz"
+
+# Backup volumes
+for volume in postgres-data rabbitmq-data identity-keys user-uploads; do
+    docker run --rm \
+        -v prod_${volume}:/data \
+        -v "$BACKUP_DIR":/backup \
+        alpine tar czf /backup/${volume}.tar.gz -C /data .
+done
+
+echo "Backup completed: $BACKUP_DIR"
+```
+
+### Restore Volumes
+
+```bash
+#!/bin/bash
+# Restore script
+
+BACKUP_DIR=$1
+
+if [ -z "$BACKUP_DIR" ]; then
+    echo "Usage: $0 <backup-directory>"
+    exit 1
+fi
+
+# Stop services
+docker compose -p prod down
+
+# Restore PostgreSQL
+zcat "$BACKUP_DIR/postgres.sql.gz" | docker exec -i prod-postgres-1 psql -U postgres
+
+# Restore volumes
+for volume in postgres-data rabbitmq-data identity-keys user-uploads; do
+    docker run --rm \
+        -v prod_${volume}:/data \
+        -v "$BACKUP_DIR":/backup \
+        alpine sh -c "cd /data && tar xzf /backup/${volume}.tar.gz"
+done
+
+# Start services
+docker compose -p prod up -d
+
+echo "Restore completed"
+```
+
+## Deployment Commands
+
+### Start Services
+
+```bash
+# Start all services
+docker compose -p prod up -d
+
+# Start specific service
+docker compose -p prod up -d gateway
+
+# View logs
+docker compose -p prod logs -f
+
+# View logs for specific service
+docker compose -p prod logs -f gateway
+```
+
+### Update Services
+
+```bash
+# Pull latest images
+docker compose -p prod pull
+
+# Recreate containers with new images
+docker compose -p prod up -d --force-recreate
+
+# Zero-downtime update (one service at a time)
+docker compose -p prod up -d --no-deps gateway
+```
+
+### Stop Services
+
+```bash
+# Stop all services (keeps volumes)
+docker compose -p prod down
+
+# Stop and remove volumes (DESTRUCTIVE)
+docker compose -p prod down -v
+
+# Stop specific service
+docker compose -p prod stop gateway
+```
+
+## Monitoring and Health Checks
+
+### Service Health
+
+```bash
+# Check all services
+docker compose -p prod ps
+
+# Check service health
+docker inspect --format='{{.State.Health.Status}}' prod-gateway-1
+
+# View health check logs
+docker inspect --format='{{json .State.Health}}' prod-gateway-1 | jq
+```
+
+### Resource Usage
+
+```bash
+# View resource usage
+docker stats
+
+# View disk usage
+docker system df
+
+# Clean up unused resources
+docker system prune -a --volumes
+```
+
+## Scaling
+
+### Horizontal Scaling
+
+```bash
+# Scale services
+docker compose -p prod up -d --scale user=3 --scale trip=3
+
+# Add load balancer
+docker compose -p prod up -d nginx
+```
+
+### Load Balancer Configuration
+
+```nginx nginx.conf
+upstream user_backend {
+    server user-1:8080;
+    server user-2:8080;
+    server user-3:8080;
+}
+
+server {
+    listen 80;
+    
+    location /api/users {
+        proxy_pass http://user_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Services Not Starting">
+    ```bash
+    # Check logs
+    docker compose -p prod logs gateway
+    
+    # Check dependencies
+    docker compose -p prod ps
+    
+    # Verify network connectivity
+    docker exec prod-gateway-1 ping postgres
+    ```
+  </Accordion>
+  
+  <Accordion title="Database Connection Issues">
+    ```bash
+    # Test PostgreSQL connection
+    docker exec prod-postgres-1 psql -U postgres -c "SELECT 1"
+    
+    # Check connection from service
+    docker exec prod-user-1 nc -zv postgres 5432
+    ```
+  </Accordion>
+  
+  <Accordion title="Volume Permission Issues">
+    ```bash
+    # Fix permissions
+    docker exec prod-user-1 chown -R app:app /app/uploads
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Aspire Deployment" icon="cloud" href="/setup/aspire-deployment">
+    Deploy with .NET Aspire publish
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/operations/monitoring">
+    Set up monitoring and alerting
+  </Card>
+</CardGroup>

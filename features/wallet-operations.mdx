@@ -1,0 +1,552 @@
+---
+title: 'Wallet Operations'
+description: 'Manage digital wallets for passengers and drivers including deposits, withdrawals, and transaction tracking'
+icon: 'wallet'
+---
+
+## Overview
+
+The wallet system provides digital balance management for both passengers and drivers. Passengers use wallets to pay for trips instantly, while drivers accumulate earnings that can be withdrawn. The system supports multiple currencies and maintains detailed transaction histories.
+
+## Wallet Types
+
+<CardGroup cols={2}>
+  <Card title="Passenger Wallet" icon="user">
+    Used for trip payments and top-ups. Supports instant booking confirmation.
+  </Card>
+  
+  <Card title="Driver Wallet" icon="car">
+    Accumulates trip earnings minus platform commission. Supports withdrawals.
+  </Card>
+</CardGroup>
+
+## Passenger Wallet
+
+### Check Wallet Balance
+
+```http
+GET /api/passengers/{passengerId}/wallet?currency=SAR
+```
+
+**Implementation:**
+```csharp src/services/Trips/Trips.Api/Features/Passengers/GetWallet.cs
+public sealed class GetPassengerWalletHandler(
+    IPassengerWalletRepository passengerWalletRepository,
+    ILogger<GetPassengerWalletHandler> logger)
+    : IRequestHandler<GetPassengerWalletQuery, GetPassengerWalletResponse>
+{
+    public async Task<GetPassengerWalletResponse> Handle(
+        GetPassengerWalletQuery request, 
+        CancellationToken cancellationToken)
+    {
+        PassengerWallet? wallet = await passengerWalletRepository.GetPassengerWalletAsync(
+            request.PassengerId,
+            request.Currency,
+            cancellationToken);
+
+        if (wallet != null)
+        {
+            return new GetPassengerWalletResponse
+            {
+                Currency = wallet.Currency,
+                WalletBalance = wallet.WalletBalance,
+                HasWallet = true
+            };
+        }
+
+        return new GetPassengerWalletResponse
+        {
+            Currency = request.Currency,
+            WalletBalance = 0m,
+            HasWallet = false
+        };
+    }
+}
+```
+
+**Response:**
+```json
+{
+  "currency": "SAR",
+  "walletBalance": 500.00,
+  "hasWallet": true
+}
+```
+
+### Top Up Wallet via Bank Transfer
+
+Passengers can add funds to their wallet by submitting a bank transfer receipt:
+
+```http
+POST /api/wallet/top-up/bank-transfer
+```
+
+**Request (multipart/form-data):**
+```
+bankAccountId: ba_123456
+amount: 500 SAR
+note: Bank transfer from account ending in 1234
+receiptImage: [image file]
+```
+
+<Steps>
+  <Step title="Upload Receipt">
+    Passenger uploads bank transfer receipt with transaction details:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/WalletTopUp/WalletTopUpBankTransferEndpoint.cs
+    if (receiptImage is { Length: > 0 })
+    {
+        string[] allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+        string extension = Path.GetExtension(receiptImage.FileName).ToLowerInvariant();
+        
+        if (!allowedExtensions.Contains(extension))
+        {
+            return Results.BadRequest(new WalletTopUpBankTransferResponse
+            {
+                Success = false,
+                Message = "نوع الملف غير مدعوم. الأنواع المسموح بها: JPG, JPEG, PNG, GIF, WEBP"
+            });
+        }
+
+        if (receiptImage.Length > 10 * 1024 * 1024)
+        {
+            return Results.BadRequest(new WalletTopUpBankTransferResponse
+            {
+                Success = false,
+                Message = "حجم الملف كبير جداً. الحد الأقصى 10 ميجابايت"
+            });
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Create Transfer Record">
+    System creates a pending bank transfer record:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/WalletTopUp/WalletTopUpBankTransferHandler.cs
+    var bankTransfer = new BankTransfer
+    {
+        Id = transferId,
+        BookingId = null,
+        PassengerId = request.UserType == "Passenger" ? request.UserId : null,
+        DriverId = request.UserType == "Driver" ? request.UserId : null,
+        CompanyId = request.UserType == "Company" ? request.UserId : null,
+        UserType = request.UserType,
+        TransferType = BankTransferTypes.WalletTopUp,
+        BankAccountId = request.BankAccountId,
+        RequestedAmount = request.RequestedAmount,
+        Amount = 0,
+        Currency = currencyCode,
+        Note = request.Note,
+        ReceiptImageUrl = request.ReceiptImageUrl,
+        Status = BankTransferStatuses.Pending,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+
+    await bankTransferRepository.AddBankTransferAsync(bankTransfer, cancellationToken);
+    ```
+  </Step>
+  
+  <Step title="Admin Review">
+    Admin reviews the transfer and either approves or rejects it:
+    
+    ```http
+    POST /api/wallet/top-up/bank-transfer/{transferId}/approve
+    POST /api/wallet/top-up/bank-transfer/{transferId}/reject
+    ```
+  </Step>
+  
+  <Step title="Wallet Credit">
+    Upon approval, the wallet is credited with the verified amount.
+  </Step>
+</Steps>
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "تم إرسال طلب شحن المحفظة للمراجعة. سيتم إشعارك عند الموافقة.",
+  "transferId": "bt_abc123",
+  "status": "Pending"
+}
+```
+
+### Approve Top-Up Request (Admin)
+
+```http
+POST /api/wallet/top-up/bank-transfer/{transferId}/approve
+```
+
+```json
+{
+  "verifiedAmount": 500.00
+}
+```
+
+### Reject Top-Up Request (Admin)
+
+```http
+POST /api/wallet/top-up/bank-transfer/{transferId}/reject
+```
+
+```json
+{
+  "reason": "Receipt image is not clear. Please resubmit."
+}
+```
+
+## Driver Wallet
+
+### Check Driver Wallet
+
+```http
+GET /api/drivers/me/wallet
+```
+
+**Response:**
+```json
+{
+  "currency": "SAR",
+  "walletBalance": 2500.00,
+  "totalEarnings": 5000.00,
+  "totalCommission": 500.00,
+  "netProfit": 4500.00
+}
+```
+
+**Implementation:**
+```csharp src/services/Users/Users.Api/Features/Drivers/GetWallet.cs
+public sealed class GetWalletHandler(
+    AppDbContext context,
+    ITripsUsageClient tripsUsageClient,
+    ILogger<GetWalletHandler> logger)
+{
+    public async Task<Result<GetWalletResponse>> HandleAsync(
+        ClaimsPrincipal user,
+        CancellationToken cancellationToken = default)
+    {
+        string driverId = userIdResult.Value;
+
+        Driver driver = await context.Drivers
+            .FirstOrDefaultAsync(d => d.Id == driverId && !d.IsDeleted, cancellationToken)
+            ?? throw new UserNotFoundException("لم يتم العثور على السائق");
+
+        string? displayCurrencyId = !string.IsNullOrWhiteSpace(driver.DisplayCurrencyId)
+            ? driver.DisplayCurrencyId
+            : driver.DefaultCurrencyId;
+
+        WalletDataResponse? walletData = await tripsUsageClient.GetDriverWalletAsync(
+            driverId, 
+            displayCurrency, 
+            cancellationToken);
+
+        return Result<GetWalletResponse>.Success(new GetWalletResponse
+        {
+            Currency = displayCurrency,
+            WalletBalance = Math.Round(walletData.WalletBalance, 2),
+            TotalEarnings = Math.Round(walletData.TotalEarnings, 2),
+            TotalCommission = Math.Round(walletData.TotalCommission, 2),
+            NetProfit = Math.Round(walletData.NetProfit, 2)
+        });
+    }
+}
+```
+
+### Wallet Breakdown
+
+<AccordionGroup>
+  <Accordion title="Total Earnings">
+    Sum of all trip fares received from passengers.
+  </Accordion>
+  
+  <Accordion title="Total Commission">
+    Platform commission deducted from earnings based on commission policy.
+  </Accordion>
+  
+  <Accordion title="Net Profit">
+    Total Earnings - Total Commission = Amount driver actually earned.
+  </Accordion>
+  
+  <Accordion title="Wallet Balance">
+    Available balance for withdrawal. May differ from Net Profit due to pending transactions.
+  </Accordion>
+</AccordionGroup>
+
+### Withdraw from Driver Wallet (Admin)
+
+Drivers request withdrawals through customer support, and admins process them:
+
+```http
+POST /api/admin/drivers/{driverId}/wallet/withdraw
+```
+
+```json
+{
+  "amount": 1000.00,
+  "currency": "SAR",
+  "transferReference": "IBAN: SA1234567890",
+  "notes": "Weekly withdrawal request"
+}
+```
+
+**Implementation:**
+```csharp src/services/Trips/Trips.Api/Features/Admin/DriverWallets/WithdrawFromDriverWallet.cs
+public sealed class WithdrawFromDriverWalletHandler(
+    IWalletOperationService walletOps,
+    IUsersApiService usersApiService,
+    ILogger<WithdrawFromDriverWalletHandler> logger,
+    IMessageBus messageBus)
+    : IRequestHandler<WithdrawFromDriverWalletCommand, WithdrawFromDriverWalletResponse>
+{
+    public async Task<WithdrawFromDriverWalletResponse> Handle(
+        WithdrawFromDriverWalletCommand request, 
+        CancellationToken cancellationToken)
+    {
+        string currencyCode = await CurrencyResolver.ResolveCodeAsync(
+            request.Currency, usersApiService, cancellationToken);
+
+        var result = await walletOps.AdminWithdrawFromDriverAsync(
+            new AdminWithdrawFromDriverRequest(
+                request.DriverId,
+                currencyCode,
+                request.Amount,
+                request.AdminId,
+                request.TransferReference,
+                request.Notes),
+            cancellationToken);
+
+        if (result.Success)
+        {
+            await messageBus.PublishAsync(new WalletWithdrawnNotification(
+                request.DriverId,
+                request.Amount,
+                currencyCode,
+                result.BalanceAfter,
+                request.TransferReference));
+        }
+
+        return new WithdrawFromDriverWalletResponse
+        {
+            Success = result.Success,
+            Message = result.Success
+                ? $"تم سحب {request.Amount} {currencyCode} بنجاح"
+                : result.ErrorMessage ?? "فشل في سحب المبلغ",
+            NewBalance = result.BalanceAfter
+        };
+    }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "تم سحب 1000 SAR بنجاح",
+  "newBalance": 1500.00
+}
+```
+
+## Wallet Transactions
+
+Every wallet operation creates a transaction record:
+
+### Transaction Types
+
+- **Credit**: Funds added to wallet
+  - Top-up approved
+  - Trip earnings credited
+  - Refund processed
+
+- **Debit**: Funds removed from wallet
+  - Trip payment
+  - Withdrawal
+  - Commission deduction
+
+### View Wallet Transactions
+
+```http
+GET /api/passengers/{passengerId}/wallet/transactions?currency=SAR&page=1&pageSize=20
+```
+
+```http
+GET /api/drivers/{driverId}/wallet/transactions?currency=SAR&page=1&pageSize=20
+```
+
+**Response:**
+```json
+{
+  "transactions": [
+    {
+      "id": "wt_abc123",
+      "type": "Debit",
+      "amount": 250.00,
+      "currency": "SAR",
+      "description": "Payment for trip t_xyz789",
+      "balanceBefore": 750.00,
+      "balanceAfter": 500.00,
+      "createdAt": "2026-03-10T14:30:00Z"
+    },
+    {
+      "id": "wt_def456",
+      "type": "Credit",
+      "amount": 500.00,
+      "currency": "SAR",
+      "description": "Wallet top-up via bank transfer",
+      "balanceBefore": 250.00,
+      "balanceAfter": 750.00,
+      "createdAt": "2026-03-09T10:15:00Z"
+    }
+  ],
+  "totalCount": 45,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+## Wallet Updates on Booking
+
+When a driver accepts a booking with wallet payment:
+
+<Steps>
+  <Step title="Passenger Wallet Deduction">
+    ```csharp
+    // Passenger wallet is debited
+    var passengerWalletResult = await walletOps.DeductFromPassengerWalletAsync(
+        booking.PassengerId,
+        booking.Currency,
+        booking.TotalPrice,
+        booking.Id);
+    ```
+  </Step>
+  
+  <Step title="Driver Wallet Credit">
+    ```csharp
+    // Driver wallet is credited (minus commission)
+    var driverWalletResult = await walletOps.CreditDriverWalletAsync(
+        trip.DriverId,
+        booking.Currency,
+        booking.TotalPrice,
+        booking.Id);
+    ```
+  </Step>
+  
+  <Step title="Send Notifications">
+    ```csharp
+    var walletNotification = new WalletDeductedNotification(
+        booking.Id, trip.Id, booking.PassengerId,
+        booking.TotalPrice, tripCurrency, 
+        passengerWalletResult.BalanceAfter,
+        trip.From, trip.To);
+    await messageBus.PublishAsync(walletNotification);
+
+    var driverWalletNotification = new WalletUpdatedNotification(
+        trip.Id, trip.DriverId,
+        driverWalletResult.BalanceAfter,
+        driverWalletResult.TotalEarnings,
+        driverWalletResult.TotalCommission,
+        driverWalletResult.NetProfit,
+        tripCurrency);
+    await messageBus.PublishAsync(driverWalletNotification);
+    ```
+  </Step>
+</Steps>
+
+## Multi-Currency Support
+
+Wallets are currency-specific. Each user can have multiple wallets in different currencies:
+
+```csharp
+PassengerWallet? wallet = await passengerWalletRepository.GetPassengerWalletAsync(
+    passengerId,
+    currency,  // e.g., "SAR", "USD", "AED"
+    cancellationToken);
+```
+
+<Warning>
+Payment currency must match the trip currency. Cross-currency payments require currency conversion.
+</Warning>
+
+## Admin Wallet Management
+
+Admins have full visibility and control over all wallets:
+
+### View All Passenger Wallets
+
+```http
+GET /api/admin/wallets/passengers
+```
+
+### View All Driver Wallets
+
+```http
+GET /api/admin/wallets/drivers
+```
+
+### Manual Wallet Adjustment
+
+Admins can manually credit or debit wallets for corrections:
+
+```http
+POST /api/admin/drivers/{driverId}/wallet/withdraw
+POST /api/admin/passengers/{passengerId}/wallet/credit
+```
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="Insufficient Balance">
+    ```json
+    {
+      "success": false,
+      "message": "رصيد المحفظة غير كافٍ. الرصيد الحالي: 100 SAR، المطلوب: 250 SAR"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Currency">
+    ```json
+    {
+      "success": false,
+      "message": "العملة المحددة غير مدعومة أو غير نشطة"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Bank Account Not Found">
+    ```json
+    {
+      "success": false,
+      "message": "الحساب البنكي غير موجود"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Receipt Upload Failed">
+    ```json
+    {
+      "success": false,
+      "message": "فشل رفع صورة الإيصال"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Maintain Balance" icon="piggy-bank">
+    Keep sufficient wallet balance to enable instant trip confirmations.
+  </Card>
+  
+  <Card title="Track Transactions" icon="list">
+    Regularly review wallet transactions to monitor spending and earnings.
+  </Card>
+  
+  <Card title="Clear Receipts" icon="camera">
+    Upload high-quality, legible receipt images for faster top-up approvals.
+  </Card>
+  
+  <Card title="Regular Withdrawals" icon="money-bill-transfer">
+    Drivers should withdraw earnings regularly to manage cash flow.
+  </Card>
+</CardGroup>

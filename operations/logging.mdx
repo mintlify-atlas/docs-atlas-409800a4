@@ -1,0 +1,430 @@
+---
+title: Logging
+description: Loki logging configuration, log levels, and structured logging in Masar Eagle
+---
+
+## Overview
+
+Masar Eagle uses Grafana Loki for centralized log aggregation, with structured logging through OpenTelemetry. All logs are automatically enriched with context and sent to Loki via the OpenTelemetry Collector.
+
+## Loki Configuration
+
+### Server Setup
+
+Loki is configured in AppHost.cs (src/aspire/AppHost/AppHost.cs:58-61):
+
+```csharp
+IResourceBuilder<ContainerResource> loki = 
+    builder.AddContainer("loki", "grafana/loki:latest")
+    .WithBindMount("../loki/config.yaml", "/etc/loki/config.yaml", isReadOnly: true)
+    .WithHttpEndpoint(targetPort: 3100, name: "http")
+    .WithArgs("-config.file=/etc/loki/config.yaml");
+```
+
+### Loki Settings
+
+The configuration (src/aspire/loki/config.yaml) enables modern Loki features:
+
+```yaml
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+  replication_factor: 1
+  path_prefix: /tmp/loki
+
+schema_config:
+  configs:
+  - from: 2020-05-15
+    store: tsdb
+    object_store: filesystem
+    schema: v13
+    index:
+      prefix: index_
+      period: 24h
+
+limits_config:
+  volume_enabled: true
+  discover_log_levels: true
+  allow_structured_metadata: true
+
+pattern_ingester:
+  enabled: true
+```
+
+<Accordion title="Key Features Explained">
+  - **TSDB Schema**: Modern time-series database for better query performance
+  - **Volume Enabled**: Aggregate logs by volume for cost optimization
+  - **Log Level Discovery**: Automatically detect log levels (INFO, WARN, ERROR)
+  - **Structured Metadata**: Support for key-value metadata on log lines
+  - **Pattern Ingester**: Automatic log pattern detection and extraction
+</Accordion>
+
+## Log Levels
+
+### Default Configuration
+
+Log levels are configured per service in appsettings.json:
+
+<CodeGroup>
+```json Users Service
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore": "Warning",
+      "System.Net.Http.HttpClient": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  }
+}
+```
+
+```json Gateway Service
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Yarp": "Information",
+      "Gateway.Api": "Information"
+    }
+  }
+}
+```
+
+```json Trips Service
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+```
+</CodeGroup>
+
+### Log Level Hierarchy
+
+<Steps>
+  <Step title="Trace">
+    Extremely detailed diagnostic information. Only use in development for deep debugging.
+  </Step>
+  <Step title="Debug">
+    Detailed flow information for debugging. Not enabled in production.
+  </Step>
+  <Step title="Information (Default)">
+    General application flow. Key business events, state changes.
+  </Step>
+  <Step title="Warning">
+    Unexpected events that don't prevent operation. Client errors (4xx).
+  </Step>
+  <Step title="Error">
+    Failures in current operation. Server errors (5xx), exceptions.
+  </Step>
+  <Step title="Critical">
+    Application crashes, data loss, critical failures requiring immediate attention.
+  </Step>
+</Steps>
+
+## Structured Logging
+
+### OpenTelemetry Integration
+
+Logging is configured in ServiceDefaults (src/aspire/ServiceDefaults/Extensions.cs:36-40):
+
+```csharp
+builder.Logging.AddOpenTelemetry(logging =>
+{
+    logging.IncludeFormattedMessage = true;
+    logging.IncludeScopes = true;
+});
+```
+
+This ensures:
+- Logs include formatted message text
+- Log scopes are preserved for context
+- Automatic correlation with traces
+
+### Error Logging
+
+The GlobalExceptionMiddleware (src/BuildingBlocks/Common/Middleware/GlobalExceptionMiddleware.cs:93-172) creates rich structured logs:
+
+```csharp
+using (logger.BeginScope(new Dictionary<string, object?>
+{
+    ["ErrorId"] = errorId,
+    ["ExceptionType"] = exception.GetType().FullName,
+    ["ExceptionName"] = exception.GetType().Name,
+    ["RequestPath"] = requestPath,
+    ["RequestMethod"] = requestMethod,
+    ["StatusCode"] = statusCode,
+    ["ErrorCategory"] = errorCategory,
+    ["ServiceName"] = serviceName,
+    ["UserId"] = userId ?? "Anonymous",
+    ["UserRole"] = userRole ?? "None",
+    ["TraceId"] = traceId,
+    ["QueryString"] = queryString,
+    ["UserAgent"] = userAgent,
+    ["Referer"] = referer,
+    ["RemoteIp"] = remoteIp,
+    ["ErrorDurationMs"] = elapsed.TotalMilliseconds,
+    ["HasInnerException"] = exception.InnerException != null
+}))
+{
+    if (isClientError)
+    {
+        logger.LogWarning(
+            exception,
+            "[ErrorId: {ErrorId}] Client error: {ExceptionType} - {ExceptionMessage}");
+    }
+    else
+    {
+        logger.LogError(
+            exception,
+            "[ErrorId: {ErrorId}] Server error: {ExceptionType} - {ExceptionMessage}");
+    }
+}
+```
+
+### Error Categories
+
+Errors are automatically categorized (src/BuildingBlocks/Common/Middleware/GlobalExceptionMiddleware.cs:174-189):
+
+| Exception Type | Category | Log Level |
+|---------------|----------|----------|
+| `ArgumentException`, `ArgumentNullException` | ValidationError | Warning |
+| `InvalidOperationException` | BusinessLogicError | Warning |
+| `UnauthorizedAccessException` | AuthenticationError | Warning |
+| `UserNotFoundException` | AuthenticationError | Warning |
+| `UserForbiddenException` | AuthorizationError | Warning |
+| `KeyNotFoundException` | NotFoundError | Warning |
+| `TimeoutException` | TimeoutError | Error |
+| `HttpRequestException` | ExternalServiceError | Error |
+| Other exceptions | UnexpectedError | Error |
+
+## Request/Response Logging
+
+### Gateway Logging
+
+The Gateway service includes detailed request/response logging (src/services/Gateway.Api/appsettings.json:9-29):
+
+```json
+"RequestResponse": {
+  "LogRequests": true,
+  "LogResponses": true,
+  "LogRequestBody": false,
+  "LogResponseBody": false,
+  "MaxBodySize": 1024,
+  "ExcludedPaths": [
+    "/health",
+    "/metrics",
+    "/ready",
+    "/live"
+  ],
+  "ExcludedHeaders": [
+    "Authorization",
+    "Cookie",
+    "X-Api-Key"
+  ],
+  "RequestLogLevel": "Information",
+  "ResponseLogLevel": "Information",
+  "ErrorLogLevel": "Error"
+}
+```
+
+### Request Tracking
+
+The RequestResponseLoggingMiddleware (src/services/Gateway.Api/Middleware/RequestResponseLoggingMiddleware.cs:15-60) adds:
+
+```csharp
+string requestId = GenerateRequestId(context);
+context.Items["RequestId"] = requestId;
+context.Response.Headers["X-Request-Id"] = requestId;
+
+var stopwatch = Stopwatch.StartNew();
+
+await requestLogger.LogRequestAsync(context, requestId);
+await _next(context);
+
+stopwatch.Stop();
+await requestLogger.LogResponseAsync(
+    context, requestId, statusCode, 
+    responseTimeMs, destinationService, 
+    destinationUrl, exception);
+```
+
+<Info>
+Every request gets a unique `X-Request-Id` header for end-to-end tracing across services.
+</Info>
+
+## Log Queries
+
+### LogQL Examples
+
+<AccordionGroup>
+  <Accordion title="Filter by Service">
+    ```logql
+    {service_name="user"}
+    ```
+  </Accordion>
+
+  <Accordion title="Error Logs Only">
+    ```logql
+    {service_name=~"user|trip|gateway"} |= "ERROR"
+    ```
+  </Accordion>
+
+  <Accordion title="Specific Error ID">
+    ```logql
+    {service_name=~".*"} | json | ErrorId="A1B2C3D4E5F6G7H8"
+    ```
+  </Accordion>
+
+  <Accordion title="User Activity">
+    ```logql
+    {service_name=~".*"} | json | UserId="12345"
+    ```
+  </Accordion>
+
+  <Accordion title="High Latency Requests">
+    ```logql
+    {service_name="gateway"} | json | ErrorDurationMs > 1000
+    ```
+  </Accordion>
+
+  <Accordion title="Rate of 5xx Errors">
+    ```logql
+    rate({service_name="gateway"} | json | StatusCode >= 500 [5m])
+    ```
+  </Accordion>
+
+  <Accordion title="Top Error Types">
+    ```logql
+    topk(10, sum by (ExceptionType) (
+      count_over_time({service_name=~".*"} | json | level="error" [1h])
+    ))
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Pattern Matching
+
+Loki's pattern ingester automatically detects common log patterns:
+
+```logql
+{service_name="user"} | pattern
+```
+
+Example detected patterns:
+```
+<_> Client error: <exception_type> - <message> | Path: <method> <path>
+<_> Server error: <exception_type> - <message> | Path: <method> <path>
+```
+
+## Log Retention
+
+<Warning>
+The current configuration uses local filesystem storage (`/tmp/loki`). For production:
+- Configure external object storage (S3, GCS, Azure Blob)
+- Set retention policies
+- Enable compaction
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Structured Fields" icon="brackets-curly">
+    Always use structured logging with key-value pairs instead of string interpolation:
+    ```csharp
+    // Good
+    logger.LogInformation("User {UserId} created trip {TripId}", userId, tripId);
+    
+    // Bad
+    logger.LogInformation($"User {userId} created trip {tripId}");
+    ```
+  </Card>
+
+  <Card title="Include Error IDs" icon="hashtag">
+    Always include error IDs in exception responses for correlation:
+    ```csharp
+    problemDetails.Extensions["errorId"] = errorId;
+    ```
+  </Card>
+
+  <Card title="Don't Log Secrets" icon="key">
+    Ensure sensitive headers are excluded:
+    ```json
+    "ExcludedHeaders": ["Authorization", "Cookie", "X-Api-Key"]
+    ```
+  </Card>
+
+  <Card title="Use Log Scopes" icon="layer-group">
+    Group related log entries with scopes:
+    ```csharp
+    using (logger.BeginScope(new { TripId = tripId }))
+    {
+        // All logs here include TripId
+    }
+    ```
+  </Card>
+</CardGroup>
+
+## Troubleshooting Logs
+
+### No Logs Appearing
+
+<Steps>
+  <Step title="Check OTLP Endpoint">
+    Verify services have the correct OpenTelemetry endpoint:
+    ```bash
+    echo $OTEL_EXPORTER_OTLP_ENDPOINT
+    # Should be: http://otelcollector:4317
+    ```
+  </Step>
+
+  <Step title="Verify Collector">
+    Check OpenTelemetry Collector logs:
+    ```bash
+    docker logs otelcollector
+    ```
+  </Step>
+
+  <Step title="Check Loki">
+    Verify Loki is receiving logs:
+    ```bash
+    curl http://localhost:3100/ready
+    curl http://localhost:3100/metrics | grep loki_ingester_streams
+    ```
+  </Step>
+</Steps>
+
+### Missing Structured Fields
+
+Ensure `IncludeScopes` is enabled in OpenTelemetry logging configuration.
+
+### Log Level Too Verbose
+
+Adjust in appsettings.json or via environment variable:
+```bash
+LOGGING__LOGLEVEL__DEFAULT=Warning
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Monitoring" icon="chart-line" href="./monitoring">
+    Configure metrics and dashboards
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="./troubleshooting">
+    Common issues and debugging strategies
+  </Card>
+</CardGroup>

@@ -1,0 +1,370 @@
+---
+title: 'Token'
+api: 'POST /connect/token'
+description: 'Exchange credentials for access and refresh tokens using OAuth 2.0 / OpenID Connect'
+---
+
+## Overview
+
+The token endpoint is the core authentication endpoint that issues access tokens and refresh tokens. It supports multiple grant types for different authentication flows:
+
+- **OTP Grant** (`urn:masareagle:otp`) - Passwordless authentication for drivers and passengers using phone number + OTP
+- **Password Grant** (`password`) - Traditional username/password authentication for admin and company users
+- **Refresh Token Grant** (`refresh_token`) - Exchange a refresh token for new access tokens
+
+This endpoint follows the OAuth 2.0 and OpenID Connect specifications and is powered by OpenIddict.
+
+## Authentication
+
+This endpoint does not require authentication. Credentials are provided in the request body.
+
+## Grant Types
+
+### OTP Grant (Passwordless)
+
+Authenticate using a phone number and OTP code. This is the primary authentication method for drivers and passengers.
+
+<ParamField body="grant_type" type="string" required>
+  Must be `urn:masareagle:otp` for OTP-based authentication
+</ParamField>
+
+<ParamField body="phone_number" type="string" required>
+  The phone number with country code (e.g., +966501234567)
+</ParamField>
+
+<ParamField body="otp_code" type="string" required>
+  The 6-digit OTP code received via SMS
+</ParamField>
+
+<ParamField body="user_type" type="string" required>
+  The type of user authenticating. Allowed values:
+  - `Driver` - For driver users
+  - `Passenger` - For passenger users
+  - `Admin` - For admin users (OTP auth)
+  - `Company` - For company users (OTP auth)
+</ParamField>
+
+### Password Grant
+
+Authenticate using username (email) and password. Only available for Admin and Company user types.
+
+<ParamField body="grant_type" type="string" required>
+  Must be `password` for password-based authentication
+</ParamField>
+
+<ParamField body="username" type="string" required>
+  The user's email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's password
+</ParamField>
+
+<ParamField body="user_type" type="string" required>
+  The type of user authenticating. Only `Admin` and `Company` are supported for password grant.
+</ParamField>
+
+### Refresh Token Grant
+
+Exchange a valid refresh token for new access and refresh tokens.
+
+<ParamField body="grant_type" type="string" required>
+  Must be `refresh_token`
+</ParamField>
+
+<ParamField body="refresh_token" type="string" required>
+  The refresh token obtained from a previous token request
+</ParamField>
+
+## Response
+
+<ResponseField name="access_token" type="string">
+  The JWT access token used to authenticate API requests. Include this in the `Authorization` header as `Bearer {access_token}`.
+</ResponseField>
+
+<ResponseField name="token_type" type="string">
+  Always `Bearer`
+</ResponseField>
+
+<ResponseField name="expires_in" type="integer">
+  The lifetime of the access token in seconds (typically 3600 for 1 hour)
+</ResponseField>
+
+<ResponseField name="refresh_token" type="string">
+  The refresh token that can be used to obtain new access tokens without re-authenticating
+</ResponseField>
+
+<ResponseField name="scope" type="string">
+  The scopes granted to the access token: `openid offline_access roles api`
+</ResponseField>
+
+<ResponseField name="id_token" type="string">
+  OpenID Connect ID token containing user identity claims
+</ResponseField>
+
+## Token Claims
+
+The access token includes the following claims:
+
+- `sub` (Subject) - The user's unique identifier
+- `role` - The user type (Driver, Passenger, Admin, Company)
+- `aud` (Audience) - Always `masar-eagle-api`
+- `exp` (Expiration) - Token expiration timestamp
+- `iat` (Issued At) - Token issuance timestamp
+
+<RequestExample>
+
+```bash cURL - OTP Grant
+curl -X POST https://api.masareagle.com/connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=urn:masareagle:otp" \
+  -d "phone_number=+966501234567" \
+  -d "otp_code=123456" \
+  -d "user_type=Driver"
+```
+
+```bash cURL - Password Grant
+curl -X POST https://api.masareagle.com/connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password" \
+  -d "username=admin@masareagle.com" \
+  -d "password=SecurePassword123!" \
+  -d "user_type=Admin"
+```
+
+```bash cURL - Refresh Token Grant
+curl -X POST https://api.masareagle.com/connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=refresh_token" \
+  -d "refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```javascript JavaScript - OTP Grant
+const params = new URLSearchParams({
+  grant_type: 'urn:masareagle:otp',
+  phone_number: '+966501234567',
+  otp_code: '123456',
+  user_type: 'Driver'
+});
+
+const response = await fetch('https://api.masareagle.com/connect/token', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: params
+});
+
+const tokens = await response.json();
+// Store tokens securely
+localStorage.setItem('access_token', tokens.access_token);
+localStorage.setItem('refresh_token', tokens.refresh_token);
+```
+
+```python Python - OTP Grant
+import requests
+
+response = requests.post(
+    'https://api.masareagle.com/connect/token',
+    data={
+        'grant_type': 'urn:masareagle:otp',
+        'phone_number': '+966501234567',
+        'otp_code': '123456',
+        'user_type': 'Driver'
+    }
+)
+
+tokens = response.json()
+access_token = tokens['access_token']
+```
+
+```csharp C# - OTP Grant
+using System.Net.Http;
+using System.Collections.Generic;
+
+var client = new HttpClient();
+var content = new FormUrlEncodedContent(new Dictionary<string, string>
+{
+    ["grant_type"] = "urn:masareagle:otp",
+    ["phone_number"] = "+966501234567",
+    ["otp_code"] = "123456",
+    ["user_type"] = "Driver"
+});
+
+var response = await client.PostAsync(
+    "https://api.masareagle.com/connect/token", 
+    content
+);
+
+var tokens = await response.Content.ReadFromJsonAsync<TokenResponse>();
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200 Success - OTP Grant
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMzQ1Njc4OTAiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiI0MjEzZjhjOC0xYzJhLTQxZTAtYmU2Yy1kYzJhNWY1YzI4ZmYiLCJyb2xlIjoiRHJpdmVyIiwiYXVkIjoibWFzYXItZWFnbGUtYXBpIiwiZXhwIjoxNzA5ODI3MjAwLCJpYXQiOjE3MDk4MjM2MDB9...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MjEzZjhjOC0xYzJhLTQxZTAtYmU2Yy1kYzJhNWY1YzI4ZmYiLCJleHAiOjE3MTI0MTU2MDB9...",
+  "scope": "openid offline_access roles api",
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMzQ1Njc4OTAiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiI0MjEzZjhjOC0xYzJhLTQxZTAtYmU2Yy1kYzJhNWY1YzI4ZmYiLCJyb2xlIjoiRHJpdmVyIn0..."
+}
+```
+
+```json 200 Success - Password Grant
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMzQ1Njc4OTAiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJhZG1pbi0xMjM0NSIsInJvbGUiOiJBZG1pbiIsImF1ZCI6Im1hc2FyLWVhZ2xlLWFwaSIsImV4cCI6MTcwOTgyNzIwMCwiaWF0IjoxNzA5ODIzNjAwfQ...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbi0xMjM0NSIsImV4cCI6MTcxMjQxNTYwMH0...",
+  "scope": "openid offline_access roles api",
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMzQ1Njc4OTAiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJhZG1pbi0xMjM0NSIsInJvbGUiOiJBZG1pbiJ9..."
+}
+```
+
+```json 403 Invalid OTP
+{
+  "error": "invalid_grant",
+  "error_description": "رمز التحقق غير صحيح أو منتهي الصلاحية"
+}
+```
+
+```json 403 Invalid Phone Number
+{
+  "error": "invalid_grant",
+  "error_description": "يجب أن يبدأ رقم الهاتف بعلامة +"
+}
+```
+
+```json 403 Invalid Credentials
+{
+  "error": "invalid_grant",
+  "error_description": "اسم المستخدم أو كلمة المرور غير صحيحة"
+}
+```
+
+```json 403 User Type Required
+{
+  "error": "invalid_request",
+  "error_description": "نوع المستخدم مطلوب"
+}
+```
+
+```json 403 Invalid Grant Type
+{
+  "error": "unsupported_grant_type",
+  "error_description": "نوع المنح غير مدعوم"
+}
+```
+
+```json 403 Password Grant Not Allowed
+{
+  "error": "invalid_grant",
+  "error_description": "نوع المستخدم غير مدعوم لتسجيل الدخول بكلمة مرور"
+}
+```
+
+```json 403 Invalid Refresh Token
+{
+  "error": "invalid_grant",
+  "error_description": "رمز التحديث غير صالح أو منتهي الصلاحية"
+}
+```
+
+</ResponseExample>
+
+## Authentication Flow
+
+### OTP Authentication Flow
+
+1. User enters their phone number in your app
+2. Call [Send OTP](/api/identity/send-otp) endpoint to generate and send OTP
+3. User receives OTP via SMS (6-digit code)
+4. User enters OTP code in your app
+5. Call `/connect/token` with `grant_type=urn:masareagle:otp`
+6. Store the returned `access_token` and `refresh_token` securely
+7. Include `access_token` in subsequent API requests: `Authorization: Bearer {access_token}`
+
+### Token Refresh Flow
+
+1. When access token expires (check `expires_in` or handle 401 responses)
+2. Call `/connect/token` with `grant_type=refresh_token`
+3. Store the new `access_token` and `refresh_token`
+4. Retry the original request with new access token
+
+### Password Authentication Flow
+
+1. User enters email and password in your app
+2. Call `/connect/token` with `grant_type=password`
+3. Store tokens securely
+4. Use access token for API requests
+
+## Security Best Practices
+
+**Token Storage:**
+- Never store tokens in localStorage for web apps (use httpOnly cookies or secure storage)
+- For mobile apps, use platform-specific secure storage (Keychain on iOS, Keystore on Android)
+- Never log or expose tokens in error messages
+
+**Token Usage:**
+- Always use HTTPS for token requests
+- Implement token refresh logic before expiration
+- Clear tokens on logout
+- Rotate refresh tokens periodically
+
+**Client Implementation:**
+- Implement automatic token refresh when receiving 401 responses
+- Handle race conditions when multiple requests need token refresh
+- Set up token expiration monitoring
+- Implement secure token storage per platform
+
+## User Provisioning
+
+When a user authenticates via OTP for the first time, the system automatically provisions a user account:
+
+1. Token endpoint publishes `UserAuthenticatedEvent` with phone number and user type
+2. Users service consumes the event and creates a user record if it doesn't exist
+3. Token endpoint resolves the user ID and issues tokens
+4. If user is not provisioned yet (race condition), the endpoint waits 1 second and retries
+
+This ensures seamless onboarding without requiring explicit registration.
+
+## Implementation Details
+
+The endpoint (`src/services/Identity/src/Identity.Web/TokenEndpoint.cs`):
+1. Parses the OpenIddict request context
+2. Routes to appropriate grant handler based on `grant_type`
+3. Validates credentials (OTP, password, or refresh token)
+4. Creates claims identity with user ID and role
+5. Sets scopes: `openid`, `offline_access`, `roles`, `api`
+6. Sets audience: `masar-eagle-api`
+7. Signs in using OpenIddict to generate tokens
+8. Returns OAuth 2.0 token response
+
+## Error Handling
+
+All errors follow OAuth 2.0 error response format with:
+- `error` - Standard OAuth 2.0 error code
+- `error_description` - Human-readable error message (in Arabic)
+
+Common error codes:
+- `invalid_request` - Missing or invalid required parameters
+- `invalid_grant` - Invalid credentials, expired OTP, or user not found
+- `unsupported_grant_type` - Unsupported grant type
+
+## Related Endpoints
+
+- [Send OTP](/api/identity/send-otp) - Generate and send OTP to phone number
+- [Resend OTP](/api/identity/resend-otp) - Resend OTP if not received
+
+## Source Code Reference
+
+- Token Endpoint: `src/services/Identity/src/Identity.Web/TokenEndpoint.cs`
+- OTP Grant Handler: `src/services/Identity/src/Identity.Web/TokenEndpoint.cs:51`
+- Password Grant Handler: `src/services/Identity/src/Identity.Web/TokenEndpoint.cs:122`
+- Refresh Grant Handler: `src/services/Identity/src/Identity.Web/TokenEndpoint.cs:152`
+- OpenIddict Configuration: `src/services/Identity/src/Identity.Web/OpenIddictServerConfiguration.cs`
+- User Types: `src/services/Identity/src/Identity.Core/Constants/UserTypes.cs`

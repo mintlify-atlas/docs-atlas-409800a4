@@ -1,0 +1,470 @@
+---
+title: 'Reviews & Ratings'
+description: 'Review and rating system for drivers, passengers, and companies to maintain service quality'
+icon: 'star'
+---
+
+## Overview
+
+The review and rating system enables drivers and passengers to rate each other after completing trips. This creates accountability, builds trust, and helps users make informed decisions. Companies can also be reviewed by passengers.
+
+## Rating Scale
+
+All ratings use a **5-star scale**:
+
+<CardGroup cols={5}>
+  <Card title="1 Star" icon="star">Poor</Card>
+  <Card title="2 Stars" icon="star">Below Average</Card>
+  <Card title="3 Stars" icon="star">Average</Card>
+  <Card title="4 Stars" icon="star">Good</Card>
+  <Card title="5 Stars" icon="star">Excellent</Card>
+</CardGroup>
+
+## Driver Reviews
+
+Passengers can rate and review drivers after completing a trip.
+
+### Create Driver Review
+
+```http
+POST /api/trips/{tripId}/driver-review
+```
+
+**Request Body:**
+```json
+{
+  "driverId": "d_789012",
+  "passengerId": "p_123456",
+  "rating": 5,
+  "comment": "Excellent driver! Very professional and arrived on time. The car was clean and comfortable."
+}
+```
+
+### Implementation
+
+The system performs comprehensive validation before accepting reviews:
+
+```csharp src/services/Trips/Trips.Api/Features/DriverReviews/Create/CreateDriverReviewHandler.cs
+public async Task<CreateDriverReviewResponse> Handle(
+    CreateDriverReviewCommand request, 
+    CancellationToken ct)
+{
+    ThrowWhen(string.IsNullOrWhiteSpace(request.DriverId), "يجب تحديد معرف السائق");
+    ThrowWhen(request.Rating < 1 || request.Rating > 5, "التقييم يجب أن يكون بين 1 و 5");
+
+    var (driverId, isCompleted) = await ResolveTripDriverAsync(request.TripId, request.DriverId, ct);
+
+    ThrowWhen(!string.Equals(driverId, request.DriverId, StringComparison.OrdinalIgnoreCase), 
+        "معرف السائق لا يطابق سائق هذه الرحلة");
+    ThrowWhen(!isCompleted, "يمكن تقييم السائق فقط بعد إكمال الرحلة");
+
+    var hasValidBooking = await HasValidBookingAsync(request.TripId, request.PassengerId, ct);
+    ThrowWhen(!hasValidBooking, 
+        "يمكن تقييم السائق فقط من قبل الركاب الذين لديهم حجز مؤكد أو مكتمل في رحلة مكتملة");
+
+    var existingReview = await driverReviewRepository.GetDriverReviewByTripAndPassengerAsync(
+        request.TripId, request.PassengerId, ct);
+    ThrowWhen(existingReview is not null, "لقد قمت بتقييم هذه الرحلة مسبقاً");
+
+    var review = DriverReview.Create(
+        request.DriverId, request.PassengerId, request.TripId, 
+        request.Rating, request.Comment);
+    await driverReviewRepository.AddDriverReviewAsync(review, ct);
+
+    await UpdateDriverOverallRatingAsync(request.DriverId, ct);
+}
+```
+
+<Steps>
+  <Step title="Validation">
+    - Rating must be between 1-5
+    - Trip must be completed
+    - Passenger must have a confirmed/completed booking
+    - No duplicate reviews allowed
+  </Step>
+  
+  <Step title="Create Review">
+    Save the review with rating and optional comment.
+  </Step>
+  
+  <Step title="Update Overall Rating">
+    Recalculate driver's average rating:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/DriverReviews/Create/CreateDriverReviewHandler.cs
+    private async Task UpdateDriverOverallRatingAsync(string driverId, CancellationToken ct)
+    {
+        var reviews = (await driverReviewRepository.GetDriverReviewsAsync(
+            driverId, page: null, pageSize: null, ct)).ToList();
+        decimal roundedRating = reviews.Count > 0 
+            ? Math.Round(reviews.Average(r => (decimal)r.Rating), 2) 
+            : 0;
+        await usersApiService.UpdateDriverRatingAsync(
+            driverId, roundedRating, reviews.Count, ct);
+    }
+    ```
+  </Step>
+  
+  <Step title="Send Notification">
+    Notify the driver about the new review:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/DriverReviews/Create/CreateDriverReviewHandler.cs
+    await messageBus.PublishAsync(new DriverReviewCreatedNotification(
+        review.Id, tripId, driverId, passengerId,
+        review.Rating, review.Comment, driver?.Name, passenger?.Name));
+    ```
+  </Step>
+</Steps>
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "تم إضافة التقييم بنجاح",
+  "reviewId": "dr_abc123",
+  "rating": 5,
+  "averageRating": 4.7,
+  "totalReviews": 28
+}
+```
+
+### View Driver Reviews
+
+```http
+GET /api/drivers/{driverId}/reviews?page=1&pageSize=10
+```
+
+**Response:**
+```json
+{
+  "reviews": [
+    {
+      "id": "dr_abc123",
+      "passengerId": "p_123456",
+      "passengerName": "Mohammed Ahmed",
+      "rating": 5,
+      "comment": "Excellent driver! Very professional.",
+      "tripId": "t_xyz789",
+      "from": "Riyadh",
+      "to": "Jeddah",
+      "createdAt": "2026-03-10T15:30:00Z"
+    }
+  ],
+  "averageRating": 4.7,
+  "totalReviews": 28,
+  "ratingDistribution": {
+    "5": 20,
+    "4": 5,
+    "3": 2,
+    "2": 1,
+    "1": 0
+  }
+}
+```
+
+## Passenger Reviews
+
+Drivers can rate passengers after completing trips to help other drivers make informed decisions.
+
+### Create Passenger Review
+
+```http
+POST /api/trips/{tripId}/passenger-review
+```
+
+**Request Body:**
+```json
+{
+  "driverId": "d_789012",
+  "passengerId": "p_123456",
+  "rating": 5,
+  "comment": "Great passenger! Respectful and on time."
+}
+```
+
+### Implementation
+
+```csharp src/services/Trips/Trips.Api/Features/PassengerReviews/Create/CreatePassengerReviewHandler.cs
+public async Task<CreatePassengerReviewResponse> Handle(
+    CreatePassengerReviewCommand request, 
+    CancellationToken ct)
+{
+    ThrowWhen(string.IsNullOrWhiteSpace(request.PassengerId), "يجب تحديد معرف الراكب");
+    ThrowWhen(request.Rating < 1 || request.Rating > 5, "التقييم يجب أن يكون بين 1 و 5");
+
+    var (driverId, isCompleted) = await ResolveTripDriverAsync(
+        request.TripId, request.DriverId, ct);
+
+    ThrowWhen(!string.Equals(driverId, request.DriverId, StringComparison.OrdinalIgnoreCase), 
+        "يمكنك تقييم الركاب فقط في رحلاتك الخاصة");
+    ThrowWhen(!isCompleted, "يمكن تقييم الراكب فقط بعد إكمال الرحلة");
+
+    var hasValidBooking = await HasValidBookingAsync(request.TripId, request.PassengerId, ct);
+    ThrowWhen(!hasValidBooking, 
+        "الراكب المحدد ليس لديه حجز مؤكد أو مكتمل في هذه الرحلة");
+
+    var existingReview = await passengerReviewRepository
+        .GetPassengerReviewByTripDriverAndPassengerAsync(
+            request.TripId, request.DriverId, request.PassengerId, ct);
+    ThrowWhen(existingReview is not null, "لقد قمت بتقييم هذا الراكب في هذه الرحلة مسبقاً");
+
+    var review = PassengerReview.Create(
+        request.PassengerId, request.DriverId, request.TripId, 
+        request.Rating, request.Comment);
+    await passengerReviewRepository.AddPassengerReviewAsync(review, ct);
+
+    await UpdatePassengerOverallRatingAsync(request.PassengerId, ct);
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "تم إضافة التقييم بنجاح",
+  "reviewId": "pr_def456",
+  "driverId": "d_789012",
+  "passengerId": "p_123456",
+  "tripId": "t_xyz789",
+  "rating": 5,
+  "averageRating": 4.9,
+  "totalReviews": 12
+}
+```
+
+### View Passenger Reviews
+
+```http
+GET /api/passengers/{passengerId}/reviews?page=1&pageSize=10
+```
+
+## Company Reviews
+
+Passengers can review companies after using their services:
+
+```http
+POST /api/companies/{companyId}/reviews
+```
+
+```json
+{
+  "passengerId": "p_123456",
+  "rating": 4,
+  "comment": "Good service overall. Professional drivers."
+}
+```
+
+## Review Management
+
+### Get Review by ID
+
+```http
+GET /api/driver-reviews/{reviewId}
+GET /api/passenger-reviews/{reviewId}
+```
+
+### Delete Review (Admin)
+
+Admins can remove inappropriate or spam reviews:
+
+```http
+DELETE /api/driver-reviews/{reviewId}
+DELETE /api/passenger-reviews/{reviewId}
+```
+
+```csharp src/services/Trips/Trips.Api/Features/PassengerReviews/Delete/DeletePassengerReviewEndpoint.cs
+app.MapDelete("/api/passenger-reviews/{reviewId}", async (
+    string reviewId,
+    [FromServices] IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var command = new DeletePassengerReviewCommand { ReviewId = reviewId };
+    DeletePassengerReviewResponse result = await mediator.Send(command, cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+})
+```
+
+<Warning>
+Deleting reviews recalculates the overall rating for the affected driver or passenger.
+</Warning>
+
+## Rating Display
+
+### Driver Profile Rating
+
+```json
+{
+  "driverId": "d_789012",
+  "name": "Ahmed Ali",
+  "overallRating": 4.7,
+  "totalReviews": 28,
+  "ratingPercentage": 94,
+  "recentReviews": [
+    {
+      "rating": 5,
+      "comment": "Excellent driver!",
+      "date": "2026-03-10T15:30:00Z"
+    }
+  ]
+}
+```
+
+### Passenger Profile Rating
+
+```json
+{
+  "passengerId": "p_123456",
+  "name": "Mohammed Ahmed",
+  "overallRating": 4.9,
+  "totalReviews": 12,
+  "ratingPercentage": 98
+}
+```
+
+## Trip Type Support
+
+Reviews work across all trip types:
+
+<AccordionGroup>
+  <Accordion title="Driver Trips">
+    Standard trips created by individual drivers. Direct driver-passenger reviews.
+  </Accordion>
+  
+  <Accordion title="Company Trips">
+    Company-managed trips. May have assigned drivers. Reviews can target the driver or company.
+    
+    ```csharp src/services/Trips/Trips.Api/Features/DriverReviews/Create/CreateDriverReviewHandler.cs
+    private async Task<(string? DriverId, bool IsCompleted)> ResolveCompanyTripDriverAsync(
+        string tripId, string? requestDriverId, CancellationToken ct)
+    {
+        var companyTrip = await companyTripRepository.GetCompanyTripAsync(tripId, ct);
+        var bookings = await companyTripRepository.GetTripBookingsAsync(
+            tripId, CompanyTripBookingStatuses.Completed, ct);
+        var bookingsList = bookings.ToList();
+        bool isCompleted = bookingsList.Any();
+
+        string? driverId = companyTrip.AssignedDriverId
+            ?? bookingsList.FirstOrDefault(b => !string.IsNullOrEmpty(b.DriverId))?.DriverId
+            ?? (isCompleted ? requestDriverId : null);
+
+        return (driverId, isCompleted);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Public Company Trips">
+    Public trips offered by companies. Reviews follow the same validation rules.
+  </Accordion>
+</AccordionGroup>
+
+## Review Validation Rules
+
+<Steps>
+  <Step title="Trip Completion">
+    Reviews can only be submitted after the trip status is "Completed".
+  </Step>
+  
+  <Step title="Valid Booking">
+    Reviewer must have a confirmed or completed booking for the trip:
+    
+    ```csharp src/services/Trips/Trips.Api/Features/DriverReviews/Create/CreateDriverReviewHandler.cs
+    private async Task<bool> HasValidBookingAsync(
+        string tripId, string passengerId, CancellationToken ct)
+    {
+        var regularBookings = await bookingRepository.GetTripBookingsAsync(tripId, ct);
+        var hasRegular = regularBookings.Any(b =>
+            b.PassengerId == passengerId &&
+            (string.Equals(b.Status, BookingStatuses.Confirmed, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(b.Status, BookingStatuses.Completed, StringComparison.OrdinalIgnoreCase)));
+
+        return hasRegular
+            || await HasValidCompanyTripBookingAsync(tripId, passengerId, ct)
+            || await HasValidPublicTripBookingAsync(tripId, passengerId, ct);
+    }
+    ```
+  </Step>
+  
+  <Step title="No Duplicates">
+    Users cannot review the same trip/person combination multiple times.
+  </Step>
+  
+  <Step title="Rating Range">
+    Rating must be an integer between 1 and 5 inclusive.
+  </Step>
+</Steps>
+
+## Notifications
+
+Users receive notifications when they are reviewed:
+
+```csharp src/services/Trips/Trips.Api/Features/DriverReviews/Create/CreateDriverReviewHandler.cs
+private async Task PublishNotificationAsync(
+    DriverReview review, string tripId, string driverId, string passengerId, CancellationToken ct)
+{
+    var driver = await usersApiService.GetDriverAsync(driverId, ct);
+    var passenger = await usersApiService.GetPassengerAsync(passengerId, ct);
+
+    await messageBus.PublishAsync(new DriverReviewCreatedNotification(
+        review.Id, tripId, driverId, passengerId,
+        review.Rating, review.Comment, driver?.Name, passenger?.Name));
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Provide Constructive Feedback" icon="comments">
+    Leave detailed comments explaining your rating to help others make informed decisions.
+  </Card>
+  
+  <Card title="Be Honest and Fair" icon="balance-scale">
+    Rate based on actual experience. Avoid extreme ratings without justification.
+  </Card>
+  
+  <Card title="Review Promptly" icon="clock">
+    Submit reviews soon after trip completion while details are fresh.
+  </Card>
+  
+  <Card title="Focus on Service Quality" icon="award">
+    Rate professionalism, punctuality, cleanliness, and communication.
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="Trip Not Completed">
+    ```json
+    {
+      "success": false,
+      "message": "يمكن تقييم السائق فقط بعد إكمال الرحلة"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Rating">
+    ```json
+    {
+      "success": false,
+      "message": "التقييم يجب أن يكون بين 1 و 5"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="No Valid Booking">
+    ```json
+    {
+      "success": false,
+      "message": "يمكن تقييم السائق فقط من قبل الركاب الذين لديهم حجز مؤكد أو مكتمل"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Duplicate Review">
+    ```json
+    {
+      "success": false,
+      "message": "لقد قمت بتقييم هذه الرحلة مسبقاً"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,620 @@
+---
+title: Database Migrations
+description: Managing database schema changes with FluentMigrator in Masar Eagle
+---
+
+Masar Eagle uses **FluentMigrator** for database migrations with PostgreSQL. The migration system is automated, version-controlled, and runs automatically on service startup.
+
+## Migration Architecture
+
+### Components
+
+<CardGroup cols={2}>
+  <Card title="BaseMigration" icon="layer-group">
+    Abstract base class with helper methods for safe schema changes
+  </Card>
+  <Card title="DatabaseMigrationService" icon="rocket">
+    Background service that ensures database exists and runs migrations
+  </Card>
+  <Card title="MigrationExtensions" icon="puzzle-piece">
+    DI registration for FluentMigrator
+  </Card>
+</CardGroup>
+
+### BaseMigration Class
+
+All migrations inherit from `BaseMigration`, which provides helper methods for safe, idempotent operations.
+
+**Location:** `src/BuildingBlocks/MasarEagle.Migrations/BaseMigration.cs`
+
+```csharp BaseMigration.cs
+public abstract class BaseMigration : Migration
+{
+    protected abstract string ServiceName { get; };
+
+    // Create table with standard audit columns
+    protected void CreateTableWithStandardColumns(
+        string tableName, 
+        Action<ICreateTableColumnOptionOrWithColumnSyntax>? additionalColumns = null)
+    {
+        if (!Schema.Table(tableName).Exists())
+        {
+            var table = Create.Table(tableName)
+                .WithColumn("Id").AsString(50).PrimaryKey().NotNullable()
+                .WithColumn("CreatedAt").AsDateTime().NotNullable()
+                    .WithDefault(SystemMethods.CurrentDateTime)
+                .WithColumn("UpdatedAt").AsDateTime().NotNullable()
+                    .WithDefault(SystemMethods.CurrentDateTime)
+                .WithColumn("IsDeleted").AsBoolean().NotNullable()
+                    .WithDefaultValue(false)
+                .WithColumn("DeletedAt").AsDateTime().Nullable();
+
+            additionalColumns?.Invoke(table);
+        }
+    }
+
+    // Create index if columns exist
+    protected void CreateIndexIfNotExists(
+        string tableName, 
+        string[] columnNames, 
+        bool isUnique = false)
+    {
+        bool allColumnsExist = columnNames.All(col => 
+            Schema.Table(tableName).Column(col).Exists());
+        
+        if (!allColumnsExist) return;
+        
+        string indexName = $"IX_{tableName}_{string.Join("_", columnNames)}";
+        string uniqueKeyword = isUnique ? "UNIQUE" : "";
+        string columnList = string.Join(", ", 
+            columnNames.Select(c => $"\"{c}\" ASC"));
+        
+        Execute.Sql($@"
+            CREATE {uniqueKeyword} INDEX IF NOT EXISTS ""{indexName}""
+            ON ""{tableName}" ({columnList});
+        ");
+    }
+
+    // Add column only if it doesn't exist
+    protected void AddColumnIfNotExists(
+        string tableName, 
+        string columnName, 
+        Action<IAlterTableAddColumnOrAlterColumnOrSchemaOrDescriptionSyntax> columnDefinition)
+    {
+        if (Schema.Table(tableName).Exists() && 
+            !Schema.Table(tableName).Column(columnName).Exists())
+        {
+            var syntax = Alter.Table(tableName);
+            columnDefinition(syntax);
+        }
+    }
+}
+```
+
+### DatabaseMigrationService
+
+Automated background service that:
+1. Waits for PostgreSQL to be ready (with retries)
+2. Creates the database if it doesn't exist
+3. Runs all pending migrations
+4. Logs progress with structured logging
+
+**Location:** `src/BuildingBlocks/MasarEagle.Migrations/DatabaseMigrationService.cs`
+
+```csharp DatabaseMigrationService.cs:18-40
+protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    logger.LogInformation("Starting database migration service...");
+
+    try
+    {
+        await WaitForDatabaseAsync(stoppingToken);
+
+        await RunMigrationsAsync();
+
+        logger.LogInformation("Database migrations completed successfully");
+    }
+    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+    {
+        logger.LogWarning("Database migration cancelled");
+        throw;
+    }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "Database migration failed. Application cannot start.");
+        throw;
+    }
+}
+```
+
+## Creating a Migration
+
+### 1. Create Migration File
+
+Migrations are located in `src/services/{ServiceName}/{ServiceName}.Api/Infrastructure/Migrations/`.
+
+**Naming Convention:** `{YYYYMMDD}{SequenceNumber}_{Description}.cs`
+
+Examples:
+- `202501250012_AddLocationCoordinatesToTrips.cs`
+- `202502010001_CreateCompanyTripsTable.cs`
+
+### 2. Implement Migration
+
+<CodeGroup>
+```csharp Simple Column Addition
+using FluentMigrator;
+using MasarEagle.Migrations;
+
+namespace Trips.Api.Infrastructure.Migrations;
+
+[Migration(202501250012)]
+public class AddLocationCoordinatesToTrips : BaseMigration
+{
+    protected override string ServiceName => "Trips";
+
+    public override void Up()
+    {
+        // Check before adding each column
+        if (!Schema.Table("trips").Column("from_latitude").Exists())
+        {
+            Create.Column("from_latitude")
+                .OnTable("trips")
+                .AsDecimal(10, 8)
+                .Nullable();
+        }
+
+        if (!Schema.Table("trips").Column("from_longitude").Exists())
+        {
+            Create.Column("from_longitude")
+                .OnTable("trips")
+                .AsDecimal(11, 8)
+                .Nullable();
+        }
+
+        if (!Schema.Table("trips").Column("from_address").Exists())
+        {
+            Create.Column("from_address")
+                .OnTable("trips")
+                .AsString(500)
+                .Nullable();
+        }
+
+        Console.WriteLine("Added location coordinates to trips table");
+    }
+
+    public override void Down()
+    {
+        if (Schema.Table("trips").Column("from_address").Exists())
+        {
+            Delete.Column("from_address").FromTable("trips");
+        }
+
+        if (Schema.Table("trips").Column("from_longitude").Exists())
+        {
+            Delete.Column("from_longitude").FromTable("trips");
+        }
+
+        if (Schema.Table("trips").Column("from_latitude").Exists())
+        {
+            Delete.Column("from_latitude").FromTable("trips");
+        }
+    }
+}
+```
+
+```csharp Create Table
+using FluentMigrator;
+using MasarEagle.Migrations;
+using Trips.Api.Features.Domain;
+
+namespace Trips.Api.Infrastructure.Migrations;
+
+[Migration(202501070002)]
+public class CreateTripsTableOnly : BaseMigration
+{
+    protected override string ServiceName => "Trips";
+
+    public override void Up()
+    {
+        Create.Table("trips")
+            .WithColumn("id").AsString(450).PrimaryKey()
+            .WithColumn("from_city").AsString(450).NotNullable()
+            .WithColumn("to_city").AsString(450).NotNullable()
+            .WithColumn("departure_time_utc").AsDateTimeOffset().NotNullable()
+            .WithColumn("arrival_time_utc").AsDateTimeOffset().Nullable()
+            .WithColumn("description").AsString(1000).Nullable()
+            .WithColumn("price").AsDecimal(10, 2).NotNullable()
+            .WithColumn("status").AsString(50).NotNullable()
+                .WithDefaultValue(TripStatuses.Scheduled)
+            .WithColumn("available_seats").AsInt32().NotNullable()
+            .WithColumn("total_seats").AsInt32().NotNullable()
+            .WithColumn("vehicle_id").AsString(450).NotNullable()
+            .WithColumn("driver_id").AsString(450).NotNullable()
+            .WithColumn("created_at_utc").AsDateTimeOffset().NotNullable()
+                .WithDefaultValue(SystemMethods.CurrentUTCDateTime)
+            .WithColumn("updated_at_utc").AsDateTimeOffset().NotNullable()
+                .WithDefaultValue(SystemMethods.CurrentUTCDateTime);
+
+        // Create indexes
+        Create.Index("IX_trips_vehicle_id")
+            .OnTable("trips")
+            .OnColumn("vehicle_id");
+            
+        Create.Index("IX_trips_driver_id")
+            .OnTable("trips")
+            .OnColumn("driver_id");
+    }
+
+    public override void Down()
+    {
+        Delete.Table("trips");
+    }
+}
+```
+
+```csharp Using BaseMigration Helpers
+using FluentMigrator;
+using MasarEagle.Migrations;
+
+namespace Trips.Api.Infrastructure.Migrations;
+
+[Migration(202502010001)]
+public class CreateCompanyTripsTable : BaseMigration
+{
+    protected override string ServiceName => "Trips";
+
+    public override void Up()
+    {
+        CreateTableWithStandardColumns("company_trips", table =>
+        {
+            table.WithColumn("CompanyId").AsString(450).NotNullable();
+            table.WithColumn("FromCity").AsString(450).NotNullable();
+            table.WithColumn("ToCity").AsString(450).NotNullable();
+            table.WithColumn("DepartureTimeUtc").AsDateTimeOffset().NotNullable();
+            table.WithColumn("Price").AsDecimal(10, 2).NotNullable();
+            table.WithColumn("Currency").AsString(10).NotNullable();
+            table.WithColumn("TotalSeats").AsInt32().NotNullable();
+            table.WithColumn("BookedSeats").AsInt32().NotNullable()
+                .WithDefaultValue(0);
+            table.WithColumn("Status").AsString(50).NotNullable();
+        });
+
+        // Create indexes using helper
+        CreateIndexIfNotExists("company_trips", ["CompanyId"]);
+        CreateIndexIfNotExists("company_trips", ["Status"]);
+        CreateIndexIfNotExists("company_trips", 
+            ["FromCity", "ToCity", "DepartureTimeUtc"]);
+    }
+
+    public override void Down()
+    {
+        DeleteTableIfExists("company_trips");
+    }
+}
+```
+</CodeGroup>
+
+### 3. Register Migrations
+
+Migrations are automatically registered via assembly scanning in `Program.cs`:
+
+```csharp Program.cs
+using System.Reflection;
+using MasarEagle.Constants.Aspire;
+using MasarEagle.Migrations;
+
+builder.Services.AddDatabaseMigrations(
+    builder.Configuration,
+    Assembly.GetExecutingAssembly(),  // Scan current assembly
+    connectionStringName: Components.Database.Trip);
+```
+
+## Migration Patterns
+
+### Idempotent Operations
+
+Always check if schema elements exist before creating them.
+
+```csharp
+// Good: Idempotent
+if (!Schema.Table("trips").Column("currency").Exists())
+{
+    Create.Column("currency")
+        .OnTable("trips")
+        .AsString(10)
+        .Nullable();
+}
+
+// Bad: Will fail if column exists
+Create.Column("currency")
+    .OnTable("trips")
+    .AsString(10)
+    .Nullable();
+```
+
+### Foreign Keys
+
+Use `BaseMigration.CreateForeignKeyIfNotExists()` for safe FK creation.
+
+```csharp
+CreateForeignKeyIfNotExists(
+    tableName: "bookings",
+    columnName: "TripId",
+    referencedTable: "trips",
+    referencedColumn: "Id",
+    onDelete: System.Data.Rule.Cascade);
+```
+
+### Data Migrations
+
+For data transformations, use `Execute.Sql()`.
+
+```csharp
+public override void Up()
+{
+    // Add column
+    AddColumnIfNotExists("trips", "currency", table =>
+        table.AddColumn("currency")
+            .AsString(10)
+            .Nullable());
+
+    // Migrate data
+    Execute.Sql(@"
+        UPDATE trips 
+        SET currency = 'SAR' 
+        WHERE currency IS NULL;
+    ");
+
+    // Make column non-nullable
+    Alter.Table("trips")
+        .AlterColumn("currency")
+        .AsString(10)
+        .NotNullable();
+}
+```
+
+### Dropping Tables Safely
+
+Use helper method from BaseMigration.
+
+```csharp
+public override void Down()
+{
+    DeleteTableIfExists("company_trips");
+}
+```
+
+## Migration Versioning
+
+Migration versions are long integers: `YYYYMMDD##` (date + sequence)
+
+```csharp
+[Migration(202501250012)]  // January 25, 2025, 12th migration that day
+```
+
+<Warning>
+**Never reuse or modify migration version numbers.** Once a migration runs in any environment, its version is permanent.
+</Warning>
+
+## Running Migrations
+
+### Automatic (Production)
+
+Migrations run automatically on service startup via `DatabaseMigrationService`.
+
+**Startup Logs:**
+```
+info: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Starting database migration service...
+info: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Waiting for database to be ready...
+info: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Database is ready (attempt 1/30)
+info: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Running database migrations...
+info: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Found 3 pending migrations
+info: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Database migrations completed successfully
+```
+
+### Configuration
+
+Configure retry behavior in `appsettings.json`:
+
+```json
+{
+  "Migration": {
+    "MaxRetries": 30,
+    "RetryDelaySeconds": 5
+  }
+}
+```
+
+### Manual (Development)
+
+For development testing, you can use FluentMigrator CLI:
+
+```bash
+dotnet tool install -g FluentMigrator.DotNet.Cli
+
+# Run migrations
+dotnet fm migrate \
+  --provider postgres \
+  --connection "Host=localhost;Database=tripdb;Username=postgres;Password=postgres" \
+  --assembly ./bin/Debug/net8.0/Trips.Api.dll
+
+# Rollback
+dotnet fm rollback \
+  --provider postgres \
+  --connection "Host=localhost;Database=tripdb;Username=postgres;Password=postgres" \
+  --assembly ./bin/Debug/net8.0/Trips.Api.dll \
+  --steps 1
+```
+
+## Migration Testing
+
+### Test Up and Down
+
+Always test both `Up()` and `Down()` methods.
+
+```csharp
+[Fact]
+public void Migration_Up_CreatesTableSuccessfully()
+{
+    // Arrange
+    var migration = new CreateCompanyTripsTable();
+    
+    // Act
+    migration.Up();
+    
+    // Assert
+    Assert.True(Schema.Table("company_trips").Exists());
+}
+
+[Fact]
+public void Migration_Down_DropstableSuccessfully()
+{
+    // Arrange
+    var migration = new CreateCompanyTripsTable();
+    migration.Up();
+    
+    // Act
+    migration.Down();
+    
+    // Assert
+    Assert.False(Schema.Table("company_trips").Exists());
+}
+```
+
+### Test Idempotency
+
+Ensure migrations can run multiple times safely.
+
+```csharp
+[Fact]
+public void Migration_Up_IsIdempotent()
+{
+    // Arrange
+    var migration = new AddLocationCoordinatesToTrips();
+    
+    // Act - Run twice
+    migration.Up();
+    migration.Up();  // Should not throw
+    
+    // Assert
+    Assert.True(Schema.Table("trips").Column("from_latitude").Exists());
+}
+```
+
+## Common Column Types
+
+```csharp
+// String columns
+.AsString(50)              // VARCHAR(50)
+.AsString(450)             // VARCHAR(450) - for IDs
+.AsString()                // VARCHAR(255) default
+.AsAnsiString(50)          // For ASCII-only data
+
+// Numeric columns
+.AsInt32()                 // INTEGER
+.AsInt64()                 // BIGINT
+.AsDecimal(10, 2)          // DECIMAL(10, 2) - for money
+.AsBoolean()               // BOOLEAN
+
+// Date/Time columns
+.AsDateTime()              // TIMESTAMP
+.AsDateTimeOffset()        // TIMESTAMPTZ (with timezone)
+.AsDate()                  // DATE only
+
+// Binary
+.AsBinary()                // BYTEA
+
+// JSON (PostgreSQL)
+.AsCustom("jsonb")         // JSONB column
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always Check Existence">
+    Use `Schema.Table().Exists()` and `Schema.Table().Column().Exists()` before creating schema elements.
+  </Accordion>
+  
+  <Accordion title="One Logical Change Per Migration">
+    Each migration should represent one logical change (e.g., "Add payment columns", "Create reviews table").
+  </Accordion>
+  
+  <Accordion title="Include Down() Method">
+    Always implement `Down()` for rollback capability, even if you don't plan to use it.
+  </Accordion>
+  
+  <Accordion title="Use Transactions">
+    FluentMigrator wraps each migration in a transaction automatically. Don't disable this unless absolutely necessary.
+  </Accordion>
+  
+  <Accordion title="Test Before Deployment">
+    Test migrations on a copy of production data to catch edge cases.
+  </Accordion>
+  
+  <Accordion title="Never Modify Existing Migrations">
+    Once deployed, migrations are immutable. Create a new migration to fix issues.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Migration Fails to Run
+
+**Check logs:**
+```bash
+docker logs trips-api | grep -i migration
+```
+
+**Common causes:**
+- Database not accessible
+- Connection string incorrect
+- Migration syntax error
+- Constraint violation
+
+### Database Connection Issues
+
+The migration service retries up to 30 times (configurable):
+
+```
+warn: MasarEagle.Migrations.DatabaseMigrationService[0]
+      Database not ready (attempt 5/30). Retrying in 5s...
+```
+
+### Migration Version Conflicts
+
+If two developers create migrations with the same version number:
+
+1. The second developer must rename their migration file
+2. Update the `[Migration(...)]` attribute with a new version
+3. Commit and push
+
+## Migration History
+
+FluentMigrator tracks applied migrations in the `VersionInfo` table:
+
+```sql
+SELECT * FROM "VersionInfo" ORDER BY "Version" DESC;
+```
+
+| Version | AppliedOn | Description |
+|---------|-----------|-------------|
+| 202502010001 | 2025-02-01 10:15:23 | CreateCompanyTripsTable |
+| 202501250012 | 2025-01-25 14:30:45 | AddLocationCoordinatesToTrips |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building Blocks" icon="layer-group" href="/development/building-blocks">
+    Learn about the migration infrastructure
+  </Card>
+  <Card title="Adding Features" icon="plus" href="/development/adding-features">
+    Create features that use your new schema
+  </Card>
+</CardGroup>

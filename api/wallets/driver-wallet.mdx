@@ -1,0 +1,283 @@
+---
+title: 'Driver Wallet'
+description: 'Manage driver wallet operations including balance retrieval, deposits, and withdrawals'
+---
+
+## Get Driver Wallets
+
+Retrieve a paginated list of all driver wallets with optional currency filtering.
+
+<Note>
+This endpoint requires admin authorization. Only non-company drivers are included in results.
+</Note>
+
+```bash
+GET /api/admin/wallets/drivers
+```
+
+### Query Parameters
+
+<ParamField query="currency" type="string">
+  Filter wallets by currency code (e.g., SAR, EGP) or symbol. Optional.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination. Must be greater than 0.
+</ParamField>
+
+<ParamField query="pageSize" type="integer" default="20">
+  Number of items per page. Must be between 1 and 100.
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="wallets" type="array">
+  Array of driver wallet items
+  
+  <Expandable title="wallet object">
+    <ResponseField name="userId" type="string" required>
+      Driver's unique user ID
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Driver's full name (defaults to "غير معروف" if unavailable)
+    </ResponseField>
+    
+    <ResponseField name="phoneNumber" type="string" required>
+      Driver's phone number
+    </ResponseField>
+    
+    <ResponseField name="currency" type="string" required>
+      Wallet currency code (SAR, EGP, etc.)
+    </ResponseField>
+    
+    <ResponseField name="walletBalance" type="decimal" required>
+      Current available balance in wallet
+    </ResponseField>
+    
+    <ResponseField name="totalEarnings" type="decimal" required>
+      Lifetime earnings from trips
+    </ResponseField>
+    
+    <ResponseField name="totalCommission" type="decimal" required>
+      Total commission deducted
+    </ResponseField>
+    
+    <ResponseField name="netProfit" type="decimal" required>
+      Net profit (earnings - commission)
+    </ResponseField>
+    
+    <ResponseField name="lastUpdatedAt" type="datetime">
+      Timestamp of last wallet update
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalCount" type="integer">
+  Total number of driver wallets matching the filter
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="pageSize" type="integer">
+  Items per page
+</ResponseField>
+
+<ResponseField name="totalPages" type="integer">
+  Total pages available
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.masareagle.sa/api/admin/wallets/drivers?currency=SAR&page=1&pageSize=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "wallets": [
+    {
+      "userId": "driver_123",
+      "name": "أحمد محمد",
+      "phoneNumber": "+966501234567",
+      "currency": "SAR",
+      "walletBalance": 1250.50,
+      "totalEarnings": 15000.00,
+      "totalCommission": 1500.00,
+      "netProfit": 13500.00,
+      "lastUpdatedAt": "2026-03-10T10:30:00Z"
+    }
+  ],
+  "totalCount": 45,
+  "page": 1,
+  "pageSize": 20,
+  "totalPages": 3
+}
+```
+
+---
+
+## Deposit to Driver Wallet
+
+Add funds to a driver's wallet (admin operation).
+
+```bash
+POST /api/admin/drivers/{driverId}/wallet/deposit
+```
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  The driver's unique user ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="amount" type="decimal" required>
+  Amount to deposit. Must be positive.
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (SAR, EGP, etc.) or symbol
+</ParamField>
+
+<ParamField body="transferReference" type="string">
+  Optional bank transfer or transaction reference number
+</ParamField>
+
+<ParamField body="notes" type="string">
+  Optional admin notes for this deposit
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if deposit was successful
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success or error message in Arabic
+</ResponseField>
+
+<ResponseField name="newBalance" type="decimal">
+  Driver's new wallet balance after deposit
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/drivers/driver_123/wallet/deposit" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 500.00,
+    "currency": "SAR",
+    "transferReference": "TRF20260310001",
+    "notes": "Monthly bonus payment"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "message": "تم إيداع 500.00 SAR بنجاح",
+  "newBalance": 1750.50
+}
+```
+
+<Info>
+A wallet deposit notification is automatically sent to the driver upon successful deposit.
+</Info>
+
+---
+
+## Withdraw from Driver Wallet
+
+Withdraw funds from a driver's wallet (admin operation).
+
+```bash
+POST /api/admin/drivers/{driverId}/wallet/withdraw
+```
+
+### Path Parameters
+
+<ParamField path="driverId" type="string" required>
+  The driver's unique user ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="amount" type="decimal" required>
+  Amount to withdraw. Must be positive and not exceed wallet balance.
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code (SAR, EGP, etc.) or symbol
+</ParamField>
+
+<ParamField body="transferReference" type="string">
+  Optional bank transfer or transaction reference number
+</ParamField>
+
+<ParamField body="notes" type="string">
+  Optional admin notes for this withdrawal
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if withdrawal was successful
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success or error message in Arabic
+</ResponseField>
+
+<ResponseField name="newBalance" type="decimal">
+  Driver's new wallet balance after withdrawal
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST "https://api.masareagle.sa/api/admin/drivers/driver_123/wallet/withdraw" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000.00,
+    "currency": "SAR",
+    "transferReference": "WD20260310001",
+    "notes": "Driver withdrawal request"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "message": "تم سحب 1000.00 SAR بنجاح",
+  "newBalance": 750.50
+}
+```
+
+### Error Response
+
+```json
+{
+  "success": false,
+  "message": "رصيد غير كافي",
+  "newBalance": null
+}
+```
+
+<Warning>
+Withdrawals will fail if the amount exceeds the available wallet balance. A withdrawal notification is sent to the driver upon success.
+</Warning>

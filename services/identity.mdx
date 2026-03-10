@@ -1,0 +1,362 @@
+---
+title: Identity Service
+description: Authentication service with OpenID Connect and OTP-based login
+---
+
+## Overview
+
+The Identity service provides authentication and authorization for the Masar Eagle platform. It implements **OpenID Connect** using **OpenIddict** and supports both **OTP-based authentication** for drivers/passengers and **password-based authentication** for admins/companies.
+
+<Info>
+  Identity location: `src/services/Identity/src/Identity.Web/Program.cs`
+</Info>
+
+## Core Responsibilities
+
+- **OTP Generation & Verification**: Send and verify one-time passwords via SMS
+- **Token Issuance**: Issue JWT access tokens and refresh tokens
+- **User Provisioning**: Automatically provision users on first authentication
+- **Password Authentication**: Support admin and company login with credentials
+- **Refresh Token Management**: Allow token refresh without re-authentication
+
+## Technology Stack
+
+- **OpenIddict**: OpenID Connect server implementation
+- **Entity Framework Core**: Database access for user credentials
+- **Wolverine**: Message bus for publishing authentication events
+- **RabbitMQ**: Event distribution to other services
+- **FluentValidation**: Request validation
+
+## Authentication Endpoints
+
+### Send OTP
+
+Initiates OTP-based authentication by sending a verification code.
+
+```http
+POST /api/auth/send-otp
+Content-Type: application/json
+
+{
+  "phoneNumber": "+966501234567",
+  "userType": "Driver"
+}
+```
+
+<ParamField path="phoneNumber" type="string" required>
+  Phone number in E.164 format (e.g., +966501234567)
+</ParamField>
+
+<ParamField path="userType" type="string" required>
+  One of: `Driver`, `Passenger`
+</ParamField>
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "تم إرسال رمز التحقق بنجاح"
+}
+```
+
+### Resend OTP
+
+Resends the OTP code if it wasn't received or expired.
+
+```http
+POST /api/auth/resend-otp
+Content-Type: application/json
+
+{
+  "phoneNumber": "+966501234567",
+  "userType": "Driver"
+}
+```
+
+### Token Endpoint (OpenID Connect)
+
+The main token endpoint supports three grant types:
+
+<Tabs>
+  <Tab title="OTP Grant">
+    ```http
+    POST /connect/token
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=urn:masareagle:otp
+    &phone_number=%2B966501234567
+    &otp_code=123456
+    &user_type=Driver
+    ```
+
+    **Parameters:**
+    - `grant_type`: `urn:masareagle:otp` (custom grant type)
+    - `phone_number`: Phone number in E.164 format
+    - `otp_code`: The 6-digit verification code
+    - `user_type`: `Driver` or `Passenger`
+
+    **Response:**
+    ```json
+    {
+      "access_token": "eyJhbGciOiJSUzI1NiIs...",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "refresh_token": "eyJhbGciOiJSUzI1NiIs..."
+    }
+    ```
+  </Tab>
+
+  <Tab title="Password Grant">
+    ```http
+    POST /connect/token
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=password
+    &username=admin@masar-eagle.com
+    &password=SecurePassword123
+    &user_type=Admin
+    ```
+
+    **Parameters:**
+    - `grant_type`: `password`
+    - `username`: Email address
+    - `password`: User password
+    - `user_type`: `Admin` or `Company`
+
+    <Warning>
+      Password grant is only supported for Admin and Company user types.
+    </Warning>
+  </Tab>
+
+  <Tab title="Refresh Token Grant">
+    ```http
+    POST /connect/token
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=refresh_token
+    &refresh_token=eyJhbGciOiJSUzI1NiIs...
+    ```
+
+    **Parameters:**
+    - `grant_type`: `refresh_token`
+    - `refresh_token`: The refresh token from previous authentication
+  </Tab>
+</Tabs>
+
+## Implementation Details
+
+### Program.cs Configuration
+
+```csharp Program.cs
+using Identity.Infrastructure;
+using Identity.Web;
+using ServiceDefaults;
+using Wolverine.RabbitMQ;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+builder.AddServiceDefaults();
+
+// Add database contexts
+builder.Services.AddAuthDatabase(builder.Configuration);
+builder.Services.AddUsersReadDatabase(builder.Configuration);
+
+// Configure OpenIddict
+builder.Services.AddOpenIddictCore();
+builder.Services.AddOpenIddictServer(builder.Configuration);
+
+// Add authentication using OpenIddict validation
+builder.Services.AddAuthentication(options =>
+    options.DefaultScheme = OpenIddict.Validation.AspNetCore
+        .OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+builder.Services.AddAuthorization();
+
+// Configure Wolverine with RabbitMQ
+await builder.UseWolverineWithRabbitMqAsync(opts =>
+{
+    opts.PublishAllMessages()
+        .ToRabbitExchange(Components.RabbitMQConfig.ExchangeName);
+    opts.ApplicationAssembly = typeof(Program).Assembly;
+});
+
+builder.Services.AddMediator(options => 
+    options.ServiceLifetime = ServiceLifetime.Scoped);
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+WebApplication app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Map endpoints
+app.MapAuthEndpoints();
+app.MapTokenEndpoint();
+
+await app.RunAsync();
+```
+
+### OTP Grant Flow
+
+The custom OTP grant type is implemented in `TokenEndpoint.cs`:
+
+```csharp TokenEndpoint.cs
+private static async Task<IResult> HandleOtpGrant(
+    OpenIddictRequest request,
+    IOtpService otpService,
+    IUserPhoneResolver phoneResolver,
+    IMessageBus messageBus)
+{
+    var phoneNumber = request.GetParameter("phone_number")?.ToString();
+    var otpCode = request.GetParameter("otp_code")?.ToString();
+    var userType = request.GetParameter("user_type")?.ToString();
+
+    // Validate parameters
+    if (string.IsNullOrEmpty(phoneNumber) || 
+        string.IsNullOrEmpty(otpCode) || 
+        string.IsNullOrEmpty(userType))
+    {
+        return ForbidWithError(
+            Errors.InvalidRequest, 
+            "رقم الهاتف، رمز التحقق ونوع المستخدم مطلوبة"
+        );
+    }
+
+    // Verify OTP code
+    var otpResult = await otpService.VerifyOtpAsync(phoneNumber, otpCode);
+    if (otpResult.Status != ResultStatus.Ok)
+    {
+        return ForbidWithError(
+            Errors.InvalidGrant, 
+            string.Join("; ", otpResult.Errors)
+        );
+    }
+
+    // Publish UserAuthenticatedEvent to provision user if needed
+    await messageBus.PublishAsync(
+        new UserAuthenticatedEvent(phoneNumber, userType, phoneNumber));
+
+    // Resolve user ID
+    var userIdResult = await phoneResolver
+        .ResolveUserIdAsync(phoneNumber, userType);
+
+    if (userIdResult.Status != ResultStatus.Ok)
+    {
+        // Race condition: wait for user provisioning
+        await Task.Delay(1000);
+        userIdResult = await phoneResolver
+            .ResolveUserIdAsync(phoneNumber, userType);
+    }
+
+    // Issue tokens
+    return SignInWithIdentity(userIdResult.Value, userType);
+}
+```
+
+### Token Claims
+
+Issued tokens include the following claims:
+
+```csharp
+var identity = new ClaimsIdentity(
+    authenticationType: TokenValidationParameters.DefaultAuthenticationType,
+    nameType: Claims.Name,
+    roleType: Claims.Role);
+
+identity.SetClaim(Claims.Subject, userId)      // User ID (GUID)
+        .SetClaim(Claims.Role, userType);      // Driver, Passenger, Admin, Company
+
+identity.SetScopes(
+    Scopes.OpenId,
+    Scopes.OfflineAccess,  // Enables refresh tokens
+    Scopes.Roles,
+    "api");
+
+identity.SetAudiences("masar-eagle-api");
+```
+
+## User Provisioning
+
+When a user authenticates for the first time, the Identity service publishes a `UserAuthenticatedEvent`:
+
+```csharp
+await messageBus.PublishAsync(
+    new UserAuthenticatedEvent(phoneNumber, userType, phoneNumber));
+```
+
+The **Users service** listens for this event and automatically creates the user record if it doesn't exist.
+
+## OTP Configuration
+
+OTP settings are configured in `appsettings.json` of the Users service (which handles SMS):
+
+```json appsettings.json
+"Sms": {
+  "Provider": "Mock",
+  "OtpExpiryMinutes": 5,
+  "OtpLength": 6,
+  "MaxOtpAttempts": 3,
+  "MaxResendAttempts": 3,
+  "ResendCooldownMinutes": 1,
+  "ResendWindowMinutes": 60
+}
+```
+
+<ParamField path="OtpExpiryMinutes" type="number" default="5">
+  How long the OTP code is valid
+</ParamField>
+
+<ParamField path="MaxOtpAttempts" type="number" default="3">
+  Maximum failed verification attempts before blocking
+</ParamField>
+
+<ParamField path="ResendCooldownMinutes" type="number" default="1">
+  Minimum time between resend requests
+</ParamField>
+
+## Error Responses
+
+The token endpoint returns errors in OpenID Connect format:
+
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "رمز التحقق غير صحيح أو منتهي الصلاحية"
+}
+```
+
+**Common error codes:**
+- `invalid_request`: Missing or malformed parameters
+- `invalid_grant`: Invalid credentials or OTP
+- `unsupported_grant_type`: Unsupported grant type requested
+
+## Database Schema
+
+The Identity service uses two databases:
+
+1. **Auth Database**: Stores OpenIddict tokens, applications, and scopes
+2. **Users Read Database**: Read-only view of user data for phone-to-ID resolution
+
+## Swagger Documentation
+
+The service includes Swagger UI for API exploration:
+
+```csharp
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+app.UseSwagger();
+app.UseSwaggerUI();
+```
+
+Access at: `http://identity:8080/swagger`
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Gateway" icon="network-wired" href="/services/gateway">
+    Routes authentication requests to Identity
+  </Card>
+  <Card title="Users Service" icon="users" href="/services/users">
+    Provisions users on first authentication
+  </Card>
+</CardGroup>

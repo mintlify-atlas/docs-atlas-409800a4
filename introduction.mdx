@@ -1,0 +1,91 @@
+---
+title: Introduction
+description: Welcome to Masar Eagle - A comprehensive transportation management system built with .NET Aspire
+---
+
+# Welcome to Masar Eagle
+
+Masar Eagle is a production-ready transportation management system built with modern .NET technologies and microservices architecture. It provides a complete solution for managing trips, bookings, users, and payments in real-time transportation operations.
+
+## What is Masar Eagle?
+
+Masar Eagle is a multi-tenant transportation platform that supports three primary user types:
+
+- **Drivers** - Create and manage trips, handle bookings, track earnings
+- **Passengers** - Search and book trips, manage payments, rate drivers
+- **Companies** - Manage fleets, drivers, and company-wide bookings
+
+The system is built on **.NET Aspire**, providing cloud-native orchestration, observability, and service discovery out of the box.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Microservices Architecture" icon="cube">
+    Built with .NET Aspire for modern cloud-native applications with independent, scalable services
+  </Card>
+  <Card title="Real-time Trip Management" icon="route">
+    Create, search, and manage trips with real-time availability and booking confirmations
+  </Card>
+  <Card title="Integrated Payments" icon="credit-card">
+    Wallet system with Moyasar payment gateway integration and bank transfer support
+  </Card>
+  <Card title="Multi-currency Support" icon="coins">
+    Flexible commission policies with support for multiple currencies and exchange rates
+  </Card>
+  <Card title="Event-driven Messaging" icon="message">
+    RabbitMQ and Wolverine for reliable, asynchronous communication between services
+  </Card>
+  <Card title="Complete Observability" icon="chart-line">
+    OpenTelemetry integration with Grafana, Prometheus, Loki, and Jaeger for monitoring
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+Masar Eagle consists of five core microservices:
+
+<CardGroup cols={2}>
+  <Card title="Gateway API" icon="gateway" href="/services/gateway">
+    YARP reverse proxy providing unified API access and routing
+  </Card>
+  <Card title="Identity Service" icon="key" href="/services/identity">
+    OpenID Connect authentication with OTP-based login
+  </Card>
+  <Card title="Users Service" icon="users" href="/services/users">
+    Manages drivers, passengers, companies, vehicles, and zones
+  </Card>
+  <Card title="Trips Service" icon="car" href="/services/trips">
+    Trip creation, booking management, and payment processing
+  </Card>
+  <Card title="Notifications Service" icon="bell" href="/services/notifications">
+    Push notifications and device token management
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+- **.NET 8** - Modern, high-performance framework
+- **.NET Aspire** - Cloud-native orchestration and service discovery
+- **PostgreSQL** - Reliable relational database
+- **RabbitMQ** - Message broker for event-driven architecture
+- **OpenID Connect** - Industry-standard authentication
+- **YARP** - Reverse proxy for API gateway
+- **Wolverine** - Messaging framework for .NET
+- **OpenTelemetry** - Observability and distributed tracing
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Masar Eagle running locally in minutes
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Learn about the system architecture and design decisions
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Deployment" icon="cloud" href="/setup/aspire-deployment">
+    Deploy Masar Eagle to production with .NET Aspire
+  </Card>
+</CardGroup>
