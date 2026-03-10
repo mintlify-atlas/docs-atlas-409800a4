@@ -1,0 +1,193 @@
+{
+  "projectType": "api-service",
+  "projectName": "Masar Eagle",
+  "projectDescription": "A comprehensive transportation management system built with .NET Aspire for managing trips, bookings, users, and payments in real-time.",
+  "theme": "aspen",
+  "primaryColor": "#0066CC",
+  "lightColor": "#4D94FF",
+  "darkColor": "#004499",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Setup & Deployment",
+            "pages": [
+              "setup/prerequisites",
+              "setup/installation",
+              "setup/configuration",
+              "setup/docker-deployment",
+              "setup/aspire-deployment"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/microservices-architecture",
+              "concepts/services-overview",
+              "concepts/authentication",
+              "concepts/messaging",
+              "concepts/database-schema"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "services/gateway",
+              "services/identity",
+              "services/users",
+              "services/trips",
+              "services/notifications"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/trip-management",
+              "features/booking-system",
+              "features/wallet-operations",
+              "features/reviews-ratings",
+              "features/admin-dashboard"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/building-blocks",
+              "development/adding-features",
+              "development/database-migrations",
+              "development/testing"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/monitoring",
+              "operations/logging",
+              "operations/troubleshooting",
+              "operations/scaling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/rate-limits",
+              "api/error-handling"
+            ]
+          },
+          {
+            "group": "Identity Service",
+            "pages": [
+              "api/identity/send-otp",
+              "api/identity/resend-otp",
+              "api/identity/token"
+            ]
+          },
+          {
+            "group": "Users Service",
+            "pages": [
+              "api/users/drivers",
+              "api/users/passengers",
+              "api/users/companies",
+              "api/users/vehicles",
+              "api/users/zones"
+            ]
+          },
+          {
+            "group": "Trips Service",
+            "pages": [
+              "api/trips/create-trip",
+              "api/trips/search-trips",
+              "api/trips/bookings",
+              "api/trips/company-trips",
+              "api/trips/reviews"
+            ]
+          },
+          {
+            "group": "Wallet & Payments",
+            "pages": [
+              "api/wallets/driver-wallet",
+              "api/wallets/passenger-wallet",
+              "api/wallets/company-wallet",
+              "api/payments/moyasar-integration",
+              "api/payments/bank-transfers"
+            ]
+          },
+          {
+            "group": "Admin APIs",
+            "pages": [
+              "api/admin/trip-management",
+              "api/admin/user-management",
+              "api/admin/wallet-operations",
+              "api/admin/reports",
+              "api/admin/dashboard"
+            ]
+          },
+          {
+            "group": "Notifications",
+            "pages": [
+              "api/notifications/send",
+              "api/notifications/device-tokens"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Microservices architecture with .NET Aspire orchestration",
+    "Multi-tenant transportation system with driver, passenger, and company support",
+    "Real-time trip management and booking system",
+    "Integrated wallet and payment processing with Moyasar",
+    "OpenID Connect authentication with OTP-based login",
+    "RabbitMQ-based event-driven messaging with Wolverine",
+    "Multi-currency support with flexible commission policies",
+    "Comprehensive admin dashboard with financial reports",
+    "Review and rating system for drivers, passengers, and companies",
+    "YARP reverse proxy gateway for unified API access",
+    "PostgreSQL database with migration management",
+    "OpenTelemetry observability with Grafana, Prometheus, Loki, and Jaeger"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/send-otp - Send OTP for authentication",
+    "POST /api/auth/resend-otp - Resend OTP",
+    "POST /connect/token - Exchange OTP for access token",
+    "GET /api/trips/search/unified - Unified trip search",
+    "POST /api/public-trips/{tripId}/book - Book a public trip",
+    "GET /api/drivers/{driverId}/trips - Get driver trips",
+    "GET /api/passengers/{passengerId}/trips - Get passenger trips",
+    "POST /api/drivers/{driverId}/trips - Create driver trip",
+    "POST /api/companies/{companyId}/trips - Create company trip",
+    "GET /api/drivers/{driverId}/wallet - Get driver wallet",
+    "GET /api/passengers/{passengerId}/wallet - Get passenger wallet",
+    "POST /api/wallet/top-up/bank-transfer - Top up wallet via bank transfer",
+    "POST /api/bookings/{bookingId}/verify-payment - Verify payment",
+    "POST /api/bookings/{bookingId}/cancel - Cancel booking",
+    "POST /api/trips/{tripId}/driver-review - Submit driver review",
+    "POST /api/trips/{tripId}/passenger-review - Submit passenger review",
+    "GET /api/admin/dashboard/financial-summary - Admin financial dashboard",
+    "GET /api/admin/trips - List all trips (admin)",
+    "GET /api/admin/wallets/drivers - List driver wallets (admin)",
+    "POST /api/admin/trips/{tripId}/cancel - Cancel trip (admin)",
+    "GET /api/zones/validate-travel - Validate travel between zones",
+    "GET /api/currencies - List supported currencies",
+    "POST /api/notifications - Send notification",
+    "POST /api/device-tokens - Register device token"
+  ]
+}
